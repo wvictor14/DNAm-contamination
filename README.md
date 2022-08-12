@@ -6,4 +6,4 @@ Contamination is a big issue in placental research as complete separation of the
 
 However, the influence of contamination on DNA methylation studes of the placenta has not been comprehensively explored, nor are there standardized tools to assess contamination in this type of data.
 
-In this research, I developed approaches to estimate contamination in placental DNA methylation samples.
+In this research, I developed approaches to estimate contamination in placental DNA methylation samples. Although I did the majority of this analysis in R, which is not yet published, I chose to write the validation analysis scripts in python to acquire experience.
