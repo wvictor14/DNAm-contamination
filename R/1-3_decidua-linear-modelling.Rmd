@@ -1,0 +1,907 @@
+---
+title: "PCA"
+author: "Victor Yuan"
+date: "21/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+For determining
+
+1. DMCs between Villi and Decidua
+2. DMCs between Villi and maternal blood
+
+3. PCA on DMCs from 1. and 2.
+
+# Load data and libraries
+
+```{r}
+library(limma)
+library(biobroom)
+library(irlba)
+library(wateRmelon)
+library(pheatmap)
+library(tidyverse)
+library(viridis)
+library(planet)
+```
+
+```{r}
+ss_ACA <- readRDS(here::here('data', 'r objects', '0-1_ss-ACA.rds'))
+ss_GSE100197 <- read_csv('Z:/7_ExternalData/GSE100197/GSE100197_metadata.csv' )
+ss_GSE98224 <- read_csv('Z:/7_ExternalData/GSE98224/GSE98224_metadata.csv')
+ss_ntd <- readRDS(here::here('data', 'r objects', '0-1_ss-NTD.rds'))
+ss_GSE113600 <- read_csv('Z:/7_ExternalData/GSE113600/GSE113600_metadata.csv')
+ss_GSE120250 <- read_csv('Z:/7_ExternalData/GSE120250/GSE120250_metadata.csv')
+ss_reps_450k <- readRDS(here::here('data', 'r objects', '0-1_ss-reps-450k.rds'))
+ss_reps_850k <- readRDS(here::here('data', 'r objects', '0-1_ss-reps-850k.rds'))
+
+ss_GSE98938 <- read_csv('Z:/7_ExternalData/GSE98938/GSE98938_ss.csv')
+ss_GSE75248 <- read_csv('Z:/7_ExternalData/GSE75248/GSE75248_ss.csv')
+ss_GSE71678 <- read_csv('Z:/7_ExternalData/GSE71678/GSE71678_ss.csv')
+ss_GSE93208 <- read_csv('Z:/7_ExternalData/GSE93208/GSE93208_ss.csv')
+ss_GSE167885 <- read_csv('Z:/7_ExternalData/GSE167885/GSE167885_ss.csv')
+ss_GSE125605 <- read_csv('Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+ss_GSE75196 <- read_csv('Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+
+bmiq_ACA <- readRDS(here::here('data', 'r objects', '0-1_bmiq-ACA.rds'))
+bmiq_GSE100197 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE100197.rds'))
+bmiq_GSE98224 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE98224.rds'))
+bmiq_NTD <- readRDS(here::here('data', 'r objects', '0-1_bmiq-NTD.rds'))
+bmiq_GSE113600 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE113600.rds'))
+bmiq_GSE120250 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE120250.rds'))
+bmiq_reps_EPIC <- readRDS(here::here('data', 'r objects', '0-1_bmiq-reps_EPIC.rds')) 
+bmiq_reps_450k <- readRDS(here::here('data', 'r objects', '0-1_bmiq-reps_450k.rds')) 
+
+
+bmiq_GSE98938 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE98938.rds')) 
+bmiq_GSE75248 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE75248.rds')) 
+bmiq_GSE71678 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE71678.rds')) 
+bmiq_GSE93208 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE93208.rds')) 
+bmiq_GSE167885 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE167885.rds')) 
+bmiq_GSE125605 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE125605.rds')) 
+bmiq_GSE75196 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE75196.rds')) 
+
+ss <- readRDS(here::here('data', 'r objects', '1-1_ss.rds'))
+
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+# Which villi samples
+
+combine data
+
+```{r}
+cpgs <- intersect(rownames(bmiq_ACA), rownames(bmiq_reps_450k))
+cpgs <- intersect(rownames(bmiq_reps_EPIC),cpgs)
+cpgs <- intersect(rownames(bmiq_GSE167885),cpgs)
+
+
+data_combined <- do.call("cbind", 
+                         list(bmiq_ACA[cpgs,], 
+                              bmiq_GSE100197[cpgs, ],
+                              bmiq_GSE98224[cpgs,],
+                              bmiq_NTD[cpgs,] ,
+                              bmiq_GSE113600[cpgs,],
+                              bmiq_GSE120250[cpgs,] ,
+                              bmiq_reps_EPIC[cpgs,],
+                              bmiq_reps_450k[cpgs,] ,
+                              
+                              bmiq_GSE98938[cpgs,],
+                              bmiq_GSE75248[cpgs,],
+                              bmiq_GSE71678[cpgs,] ,
+                              bmiq_GSE93208[cpgs,] ,
+                              bmiq_GSE167885[cpgs,],
+                              bmiq_GSE125605[cpgs,] ,
+                              bmiq_GSE75196[cpgs,] ))
+```
+
+PCA on villi
+
+```{r}
+villi <- ss %>% filter(Tissue == 'Villi') %>%
+  pull(Sample_Name)
+length(villi)
+
+set.seed(1)
+villi_pca <- prcomp_irlba(data_combined[villi,], n=5)$rotation %>% 
+  as_tibble() %>%
+  mutate(Sample_Name = colnames(data_combined))
+ss <- ss %>% left_join(villi_pca, by = 'Sample_Name')
+```
+
+Visualize pcs
+
+```{r}
+library(ggridges)
+ss %>% 
+  filter(Tissue == 'Villi',
+         
+         # only one sample in first trimester, cannot calculate density
+         GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>%
+  ggplot(aes(x = PC1, y = dataset, fill = dataset)) +
+  geom_density_ridges(jittered_points = TRUE,
+    position = position_points_jitter(height = 0),
+    point_shape = '|', point_size = 3, point_alpha = 1, alpha = 0.7) +
+  facet_grid(rows = vars(GA_cat_epi)) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = '') +
+  scale_fill_manual(values = colors)+
+  scale_color_manual(values = colors) +
+  scale_y_discrete(limits = rev)
+
+ss %>% 
+  filter(Tissue == 'Villi',
+         
+         # only one sample in first trimester, cannot calculate density
+         GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>%
+  ggplot(aes(x = PC2, y = dataset, fill = dataset)) +
+  geom_density_ridges(jittered_points = TRUE,
+    position = position_points_jitter(height = 0),
+    point_shape = '|', point_size = 3, point_alpha = 1, alpha = 0.7) +
+  facet_grid(rows = vars(GA_cat_epi)) +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = '') +
+  scale_fill_manual(values = colors)+
+  scale_color_manual(values = colors) +
+  scale_y_discrete(limits = rev)
+
+# scatter
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>%
+  ggplot(aes(x = PC1, y = PC2, color = dataset)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = '') +
+  scale_color_manual(values = colors) +
+  facet_grid(cols = vars(GA_cat_epi)) 
+
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         GEO_accession == 'GSE120250',
+         
+         GEO_accession != 'GSE98938') %>%
+  ggplot(aes(x = PC1, y = PC2, color = controls_failed)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = 'right') +
+  scale_color_manual(values = c('FALSE'='grey', 'TRUE'='red'))+
+  facet_grid(cols = vars(Outlier)) 
+
+# without ddataset GSE120250
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         
+         GEO_accession != 'GSE120250',
+         GEO_accession != 'GSE98938') %>%
+  ggplot(aes(x = PC1, y = PC2, color = dataset)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = '') +
+  scale_color_manual(values = colors) +
+  facet_grid(cols = vars(GA_cat_epi))
+
+# only candidate datasets
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         GEO_accession %in% c('GSE115508',
+                              'GSE100197',
+                              'GSE98224',
+                              'GSE69502',
+                              'GSE75248',
+                              'GSE75196')) %>%
+  ggplot(aes(x = PC1, y = PC2, color = dataset)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = 'right') +
+  scale_color_manual(values = colors) +
+  facet_grid(cols = vars(GA_cat_epi))
+
+# exclude pathology
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         GEO_accession %in% c('GSE115508',
+                              'GSE100197',
+                              'GSE98224',
+                              'GSE69502',
+                              'GSE75248',
+                              'GSE75196'),
+         !Group %in% c('Chorioamnionitis', 'EOPET')) %>%
+  ggplot(aes(x = PC1, y = PC2, color = dataset)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = 'right') +
+  scale_color_manual(values = colors) +
+  facet_grid(cols = vars(GA_cat_epi))
+
+ss %>% 
+  filter(Tissue == 'Villi',
+         GA_cat_epi != 'First',
+         GEO_accession %in% c('GSE115508',
+                              'GSE100197',
+                              'GSE98224',
+                              'GSE69502',
+                              'GSE75248',
+                              'GSE75196'),
+         !Group %in% c('Chorioamnionitis', 'EOPET')) %>%
+  count(dataset) %>%
+  mutate(sum = sum(n))
+
+```
+
+Datasets 1, 2 ,3, 4, 8, 13
+
+Second and term/third
+
+# Linear modelling
+
+First prepare input data:
+
+1. filter to samples of interest
+  - combine decidua/maternal blood samples
+2. Filter out poor quality probes + snp-interefering
+
+```{r}
+GSE74738_mbd_ss <- read_csv(here::here('data', 'raw', '0-2_GSE74738_mbd_ss.csv'))
+GSE74738_mbd_norm <- readRDS(here::here('data', 'r objects', '0-2_GSE74738_mbd_bmiq_noob.rds'))
+
+anno_EPIC <- read_tsv(here::here('data', 'raw', 'EPIC.hg19.manifest.tsv'))
+anno_450K <- read_tsv(here::here('data', 'raw', 'HM450.hg19.manifest.tsv'))
+
+mask_epic <- anno_EPIC %>%
+  filter(MASK_general) %>%
+  pull(probeID)
+mask_450k <- anno_450K %>%
+  filter(MASK_general) %>%
+  pull(probeID)
+
+length(mask_epic);length(mask_450k)
+mask_cpgs <- union(mask_450k, mask_epic)
+length(mask_cpgs)
+
+# cpgs interesecting between all datasets, and filtered for annotation
+cpgs_filtered <- setdiff(cpgs, mask_cpgs) 
+
+villi_dec <- cbind(data_combined[cpgs_filtered,],
+                   GSE74738_mbd_norm[cpgs_filtered,])
+
+dim(villi_dec) # 396151   1728
+
+# filter to samples of interest
+ss_vd <- ss %>%
+  filter(Tissue %in% c('Villi', 'decidua'),
+         GA_cat_epi != 'First',
+         GEO_accession %in% c('GSE115508',
+                              'GSE100197',
+                              'GSE98224',
+                              'GSE69502',
+                              'GSE75248',
+                              'GSE75196'),
+         !Group %in% c('Chorioamnionitis', 'EOPET')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              mutate(dataset = 'MBD'))  %>%
+  mutate(Tissue = ifelse(Tissue == 'decidua', 'Decidua', Tissue))
+
+ss_vd %>% count(dataset, Tissue)
+
+villi_dec <- villi_dec[,ss_vd$Sample_Name]
+dim(villi_dec) # 396151    568
+```
+
+```{r}
+ss_vd %>% count(dataset)
+
+# create a design matrix - model.matrix: 
+design <- model.matrix(~Tissue, data = ss_vd %>%
+                         mutate(Tissue = factor(Tissue,
+                                                levels =
+                                                  c('Villi', 
+                                                    'Decidua', 
+                                                    'Maternal Blood'))))
+
+# fit linear model
+fit <- lmFit( beta2m(villi_dec), design) %>%
+  eBayes()
+
+dmcs <- fit %>% 
+  broom::tidy() %>%
+  mutate(fdr = p.adjust(p.value, method = 'fdr'),
+         bonferroni = p.adjust(p.value, method = 'bonferroni'))
+
+# get delta betas
+dbetas <-  lmFit(villi_dec, design) %>%
+  eBayes() %>%
+  broom::tidy()  %>%
+  mutate(delta_betas = estimate) %>%
+  select(term, gene, delta_betas)
+
+dmcs <- dmcs %>%
+  left_join(dbetas, by = c('term', 'gene'))
+
+# summary of results
+dmcs %>%
+  group_by(term) %>%
+  summarize(nfdr05 = sum(bonferroni < 0.01))
+
+dmcs %>%
+  group_by(term) %>%
+  slice_sample(n = 5000) %>%
+  mutate(neglogp = -log10(bonferroni)) %>%
+  ggplot(aes(x = delta_betas, y = neglogp)) +
+  geom_point() +
+  facet_grid(cols = vars(term)) +
+  labs(y = '-log10(bonferroni)', title = '10000 randomly sampled CpGs' )
+```
+
+
+```{r}
+# top 500 hypo and hyper dmcs 
+dmcs_500 <- dmcs %>%
+  mutate(direction = ifelse(delta_betas<0, '-', '+')) %>%
+  group_by(term, direction) %>%
+  filter(abs(delta_betas) > 0.5) %>%
+  slice_max(p.value, n = 500)
+dmcs %>%
+  mutate(direction = ifelse(delta_betas<0, '-', '+')) %>%
+  filter(bonferroni < 0.05) %>%
+  ggplot(aes(x = abs(delta_betas))) +
+  geom_histogram() +
+  facet_grid(rows = vars(term))
+
+# create mean betas matrix
+a <- t(villi_dec[dmcs_500$gene,]) %>%
+  as.data.frame() %>%
+  rownames_to_column('Sample_Name') %>%
+  as_tibble()
+
+mean_dmcs_500 <- ss_vd %>%
+  left_join(a) %>%
+  select(Sample_Name, Tissue, dataset, contains('cg')) %>%
+  pivot_longer(cols = contains('cg'),
+               names_to  = 'cpg',
+               values_to = 'beta') %>%
+  group_by(Tissue, cpg) %>%
+  summarize(mean_beta = mean(beta)) %>%
+  pivot_wider(id_cols = cpg,
+              names_from = 'Tissue',
+              values_from = 'mean_beta')
+
+mean_dmcs_500 <- as.data.frame(mean_dmcs_500)
+rownames(mean_dmcs_500) <- mean_dmcs_500$cpg
+mean_dmcs_500 <- as.matrix(
+  mean_dmcs_500[,c('Decidua', 'Maternal Blood','Villi')])
+
+# visualize as heatmap
+pheatmap(t(mean_dmcs_500),
+         show_rownames = TRUE, show_colnames = FALSE,
+         color = rev(rocket(100)),
+         breaks = seq(0,1, 0.01))
+
+
+# visualize some as boxplots
+top10 <- dmcs_500 %>%
+  group_by(term, direction) %>%
+  slice_max(p.value, n = 10) %>%
+  pull(gene) 
+
+
+ss_vd %>%
+  left_join(a %>%
+              pivot_longer(cols = -Sample_Name,
+                           names_to  = 'cpg',
+                           values_to = 'beta') %>%
+              filter(cpg %in% top10)) %>%
+  group_by(Sample_Name) %>%
+  arrange(cpg) %>%
+  dplyr::slice(1:10) %>%
+  ggplot(aes(y = beta, x = cpg, color = Tissue)) +
+  geom_boxplot() +
+  geom_jitter(position = position_jitterdodge(), alpha = 0.5) 
+```
+
+# PCA
+
+First let's do:
+
+- all extraembryonic tissues/cells
+- all CpGs
+- all healthy and unhealthy samples
+
+```{r}
+# add MBD color
+colors <- c(colors, '13' = 'grey')
+
+# filter to all extraembryonic tissues / cells
+ss_ee <- ss %>%
+  filter(Tissue %in% c('Villi', 'decidua', 'Chorion', 'Amnion', 'Basal plate',
+                       'Cytotrophoblast')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              mutate(dataset = '13'))  %>%
+  mutate(Tissue = ifelse(Tissue == 'decidua', 'Decidua', Tissue)) %>%
+  group_by(Sample_Name) %>%
+  slice(1L) %>%
+  ungroup()
+
+ss_ee %>% count(dataset, Tissue)
+
+data_all <- cbind(data_combined[cpgs_filtered,],
+                   GSE74738_mbd_norm[cpgs_filtered,])
+
+
+set.seed(1)
+pca_ee <- prcomp_irlba(t(data_all[,ss_ee$Sample_Name]), n=5)
+pca_ee_var <- pca_ee$sdev^2 / sum(pca_ee$sdev^2)
+pca_ee_var
+pca_ee <- pca_ee$rotation %>% 
+  as_tibble() %>%
+  mutate(Sample_Name = ss_ee$Sample_Name) %>%
+  rename_at(vars(contains('PC')), ~paste0(., '_all_CpGs'))
+ss_ee <- ss_ee %>% left_join(pca_ee, by = 'Sample_Name')
+
+# ggplot
+colors_tissue <- c('Amnion' = '#26A9AD', 
+                   'Basal plate' = '#FEDBF4',
+                   'Chorion' = '#FF3300',
+                   'Cytotrophoblast' = '#FBC02D',
+                   'Decidua' = '#FF2BFF',
+                   'Maternal Blood' = '#6396F2',
+                   'Villi' = '#BDB9B7' )
+
+# all cpgs
+ss_ee %>%
+  mutate(dataset = factor(dataset, levels = c(1:13, 'MBD'))) %>%
+  ggplot(aes(x = PC1_all_CpGs , y = dataset , fill = Tissue)) +
+  geom_boxplot() +
+  theme_bw()  +
+  scale_fill_manual(values = colors_tissue) +
+  labs(x = 'PC1 (97.7%)' )
+#  scale_fill_manual(values = colors[unique(ss_ee$dataset)]) 
+
+ss_ee %>%
+  mutate(dataset = factor(dataset, levels = c(1:13, 'MBD'))) %>%
+  ggplot(aes(x = PC2_all_CpGs , y = dataset , fill = Tissue)) +
+  geom_boxplot() +
+  theme_bw()  +
+  scale_fill_manual(values = colors_tissue) +
+  labs(x = 'PC2 (1.5%)' )
+
+(a <- ss_ee %>%
+  ggplot(aes(y = PC3_all_CpGs , x = PC2_all_CpGs , color = Tissue)) +
+  geom_point(size = 0.75) +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank()) +
+  scale_color_manual(values = c('Amnion' = '#26A9AD', 
+                                'Basal plate' = '#FEDBF4', 
+                                'Chorion' = '#FF3300', 
+                                'Cytotrophoblast' = '#FBC02D', 
+                                'Decidua' = '#FF2BFF', 
+                                'Maternal Blood' = '#6396F2', 
+                                'Villi' = '#BDB9B7' ),
+                     guide = guide_legend(override.aes = list(size = 2),
+                                          keyheight = 0.1)) +
+  coord_equal()+
+  labs(y = 'PC3 (0.35%)', x = 'PC2 (1.5%)', color = '')) #h:3, w:6
+```
+
+Next let's repeat but using only decidua sites
+
+```{r}
+# decidua sites
+set.seed(1)
+pca_dec <-  prcomp_irlba(data_all[dmcs_500$gene,ss_ee$Sample_Name], n=5)
+pca_dec_var <- pca_dec$sdev^2 / sum(pca_dec$sdev^2)
+pca_dec_var
+pca_obj <- pca_dec
+pca_dec <- pca_dec$rotation %>% 
+  as_tibble() %>%
+  mutate(Sample_Name = ss_ee$Sample_Name) %>%
+  rename_at(vars(contains('PC')), ~paste0(., '_mbd500'))
+ss_ee <- ss_ee %>% left_join(pca_dec, by = 'Sample_Name')
+
+ss_ee %>%
+  mutate(dataset = factor(dataset, levels = c(1:13))) %>%
+  ggplot(aes(x = PC1_mbd500,  y = dataset , fill = Tissue)) +
+  geom_boxplot() +
+  theme_bw()  +
+  theme(panel.border = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line =element_line()) +
+  scale_fill_manual(values = colors_tissue) +
+  scale_color_manual(values = colors_tissue) +
+  labs(x = 'PC1 (93.9%)' ) +
+  geom_vline(data = ss_ee %>%
+               group_by(Tissue) %>%
+               summarize(mean_PC1 = mean(PC1_mbd500)),
+             aes(xintercept = mean_PC1, color = Tissue),
+             linetype = 'dashed',
+             size = 1,
+             show.legend = FALSE) 
+
+ss_ee %>%
+  mutate(dataset = factor(dataset, levels = c(1:13, 'MBD'))) %>%
+  ggplot(aes(x = PC2_mbd500 , y = dataset , fill = Tissue)) +
+  geom_boxplot() + 
+  theme_bw()  +
+  scale_fill_manual(values = colors_tissue) +
+  labs(x = 'PC2 (3.0%)' )
+
+ss_ee %>%
+  mutate(dataset = factor(dataset, levels = c(1:13, 'MBD'))) %>%
+  ggplot(aes(x = PC1_mbd500 , y = PC2_mbd500 , color = Tissue)) +
+  geom_point() +
+  scale_color_manual(values = colors_tissue) +
+  coord_equal()
+```
+
+## label samples
+
+```{r}
+sumstats <- ss_ee %>% 
+  group_by(Tissue) %>%
+  summarize(mean_PC1 = mean(PC1_mbd500),
+            sd = sd(PC1_mbd500)) 
+
+sumstats_v <- sumstats %>%
+  filter(Tissue == 'Villi') %>%
+   mutate(mean_PC1_1sd = mean_PC1 + sd,
+         mean_PC1_2sd = mean_PC1 + 2*sd,
+         mean_PC1_3sd = mean_PC1 + 3*sd) %>%
+  pivot_longer(cols = contains('mean'),
+               names_to = 'threshold') %>%
+  mutate(threshold = factor(case_when(
+    threshold == 'mean_PC1' ~ 'mean',
+    threshold != 'mean_PC1' ~ gsub('mean_PC1_', '', threshold)
+  ), levels = c('mean', paste0(1:3, 'sd'))))
+
+(a<-ss_ee %>%
+    filter(Tissue %in% c('Villi', 'Decidua', 'Maternal Blood')) %>%
+  mutate(dataset = factor(dataset, levels = c(1:13))) %>%
+  ggplot(aes(x = PC1_mbd500,  y = dataset , fill = Tissue)) +
+  geom_boxplot() +
+  theme_bw()  +
+  theme(panel.border = element_blank(), 
+        panel.grid = element_blank(),
+        #axis.ticks = element_blank(),
+        axis.line =element_line(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+  scale_fill_manual(values = colors_tissue[c('Villi', 'Decidua', 'Maternal Blood')]) +
+  labs(x = 'PC1 (94.0%)', color = '', fill = '', y = 'Dataset') +
+  geom_vline(data = sumstats_v,
+             aes(xintercept = value, color = threshold),
+             linetype = 'dashed',
+             size = 1) +
+  scale_color_viridis_d(guide = guide_legend(
+                          override.aes = list(linetype = 'solid'))) ) #h:3.5 w:6.25
+
+ss_ee <- ss_ee %>%
+  mutate(PC1_mbd500_category = 
+           ifelse(Tissue == 'Villi',
+                  cut(PC1_mbd500, breaks = c(-Inf, sumstats_v$value, Inf),
+                      labels = c("x < mean", 
+                                 "mean < x < +1sd",
+                                 "+1sd < x < +2sd",
+                                 "+2sd < x < +3sd",
+                                 "+3sd < x")) %>% as.character(),
+                  NA_character_)) %>%
+  mutate(PC1_mbd500_category = factor(PC1_mbd500_category, levels = 
+                                        c("x < mean", 
+                                 "mean < x < +1sd",
+                                 "+1sd < x < +2sd",
+                                 "+2sd < x < +3sd",
+                                 "+3sd < x")),
+         dataset = factor(dataset, levels = c(1:13, 'MBD'))) 
+(a <- ss_ee %>%
+  filter(Tissue == 'Villi',
+         PC1_mbd500_category != "x < mean") %>% 
+  ggplot(aes(y = PC1_mbd500_category, fill = PC1_mbd500_category)) +
+  geom_histogram(stat= 'count') +
+  facet_grid(rows = vars((dataset)), switch = 'y') +
+  scale_fill_viridis_d() +
+  scale_x_continuous(expand = c(0,0), limits = c(0, 150)) +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background = element_blank(),
+        legend.position = 'top',
+        legend.direction="vertical") +
+  labs(y = 'Dataset', fill = 'Categories based on PC1'))
+
+(ss_ee %>%
+  select(dataset, Sample_Name, Tissue, PC1_mbd500_category) %>%
+  group_by(dataset) %>%
+  count(PC1_mbd500_category) %>%
+  filter(!is.na(PC1_mbd500_category)) %>%
+  pivot_wider(id_cols = dataset, names_from = PC1_mbd500_category, 
+              values_from = n,
+              values_fill = NA)  %>%
+  group_by(dataset) %>%
+  mutate( `n villi` = sum(c_across(everything()), na.rm = TRUE)) %>%
+  select(dataset, `n villi`, `x < mean`,
+         `mean < x < +1sd`,
+         `+1sd < x < +2sd`,
+         `+2sd < x < +3sd`,
+         `+3sd < x`) %>%
+  write_csv(here::here('data', 'raw', '1-3_dataset-PC-MBD-cut.csv'),
+            na = ''))
+
+```
+
+Merge with ss
+```{r}
+ss <- ss %>%
+  select(-c(PC1:PC5)) %>%
+  left_join(ss_ee %>%
+              select(Sample_Name, contains('mbd500')))
+```
+
+Number of outliers that are male XY outliers + snp outlier
+
+```{r eval = FALSE}
+# result does not change if using p(outlier) > 0.1-0.2
+(ss %>%
+  group_by(dataset, PC1_mbd500_category) %>%
+  summarize(Flag_PC1_mbd = sum(
+    Flag_XY_contam == 'Flagged' &
+      prob_snp_outlier > 0.2 &
+      Flag_cell_troph == 1,
+    na.rm = TRUE)) %>%
+  mutate_if(is.numeric, ~ifelse(. == 0, NA_integer_, .)) %>%
+   pivot_wider(id_cols = dataset,
+               names_from = 'PC1_mbd500_category',
+               values_from = 'Flag_PC1_mbd') %>%
+   select(dataset, `+1sd < x < +2sd`, `+2sd < x < +3sd`, `+3sd < x`,
+          -`x < mean`, -`mean < x < +1sd`) %>%
+  write_csv(here::here('data', 'raw', '1-3_cell-PCA-outliers-overlap.csv'), 
+            na = ''))
+
+# these 2 samples are also flagged in with the component approach
+(ss %>%
+  group_by(dataset, PC1_mbd500_category) %>%
+  summarize(Flag_PC1_mbd = sum(
+    
+    Flag_XY_contam == 'Flagged' &
+      prob_snp_outlier > 0.2 &
+      Flag_cell_troph == 1 &
+      Flag_cell_troph + Flag_cell_immu + Flag_cell_mese > 0.5,
+    na.rm = TRUE)) %>%
+  mutate_if(is.numeric, ~ifelse(. == 0, NA_integer_, .)) %>%
+   pivot_wider(id_cols = dataset,
+               names_from = 'PC1_mbd500_category',
+               values_from = 'Flag_PC1_mbd') %>%
+   select(dataset, `+1sd < x < +2sd`, `+2sd < x < +3sd`, `+3sd < x`,
+          -`x < mean`, -`mean < x < +1sd`))
+  
+```
+
+# genotype x cell outlier
+
+```{r}
+# boxplots
+(a <- ss %>%
+  mutate(snp_outlier = prob_snp_outlier>0.1) %>%
+  filter(!is.na(PC1_mbd500_category)) %>%
+  ggplot(aes(x = PC1_mbd500_category, y = prob_snp_outlier)) +
+  geom_boxplot(outlier.shape = '') +
+  geom_jitter(position = position_jitter(width = 0.1),
+              alpha = 0.5)  +
+  scale_y_continuous(expand = c(0,0), 
+                     limits = c(0, 0.44),
+                     labels = function(x)scales::percent(x, accuracy = 1)) + 
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        axis.line = element_line(),
+        strip.background = element_blank())+
+  labs(x = '', y = 'P(outlier)', title = 'PC1 categories') +
+  coord_flip()) #h:2.5, w:3
+
+# label 2 outliers on PC1_mbd500 based on scatter
+ss <- ss %>%
+  mutate(PC1_mbd500_outlier = ifelse(Tissue == 'Villi',
+                                     PC1_mbd500 > 0.01,
+                                     NA)) 
+
+ss %>% filter(PC1_mbd500_outlier) %>%
+  select(Sample_Name, Tissue,
+         contains('dataset'), contains('GA'),
+         prob_snp_outlier, contains('Flag')) %>%
+  as.data.frame()
+
+#### scatter
+(a <- ss %>%
+  mutate(snp_outlier = prob_snp_outlier>0.1) %>%
+  filter(!is.na(PC1_mbd500_category), Tissue == 'Villi') %>%
+  ggplot(aes(x = PC1_mbd500, y = prob_snp_outlier)) +
+  geom_point(alpha = 0.9, size = 1, shape = 19, 
+             aes(color = PC1_mbd500_outlier)) +
+  geom_smooth(method = 'loess', color = '#468EE0') +
+  geom_smooth(method = 'lm', color = '#10B201')+
+  scale_color_manual(values = c('TRUE' = 'red', 'FALSE' = 'grey'),
+                    guide = 'none')+
+  scale_y_continuous(expand = c(0,0), 
+                     limits = c(0, 0.44),
+                     labels = function(x)scales::percent(x, accuracy = 1)) +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+      axis.line = element_line(),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background = element_blank(),
+        legend.position = 'top',
+        legend.direction="vertical")+
+  labs(x = 'PC1', y = 'P(outlier)'))
+
+# compute statistics
+lm(prob_snp_outlier~PC1_mbd500_category, 
+   data = ss %>%
+     filter(Tissue == 'Villi')) %>%
+  tidy() %>%
+  mutate(p = pvalue(p.value))
+
+lm(prob_snp_outlier~PC1_mbd500, 
+   data = ss %>%
+     filter(Tissue == 'Villi')) %>%
+  tidy() %>%
+  mutate(p = pvalue(p.value))
+
+lm(prob_snp_outlier~PC1_mbd500, 
+   data = ss %>%
+     filter(Tissue == 'Villi')) %>%
+  glance() 
+  
+# view cell comp of those outliers
+(a <- ss %>%
+  filter(dataset_label == 'ELGAN') %>%
+  
+  mutate(Sample_Name = fct_reorder(Sample_Name, PC1_mbd500)) %>%
+  
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'proportion') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, 
+                                 rev(c('Trophoblasts', 'Stromal', 
+                                       'Endothelial', 'Hofbauer', 
+                                       'nRBC')))) %>%
+  ggplot(aes(x = Sample_Name, y = proportion, fill = PC1_mbd500_outlier)) +
+  geom_bar(stat = 'identity') +
+  facet_grid(rows =vars(component),
+            switch = 'y') + 
+  scale_fill_manual(values = c('TRUE' = 'red', 'FALSE' = 'grey'),
+                    guide = 'none')+
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0,1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) + 
+  theme(#axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) 
+)
+
+# view xy plot
+ss %>%
+  filter(dataset_label == 'ELGAN') %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, 
+             color = PC1_mbd500_outlier)) +
+  geom_point() +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  scale_x_continuous(breaks = c(0.7, 0.9, 1.1)) +
+  scale_color_manual(values = c('TRUE' = 'red', 'FALSE' = 'grey'),
+                    guide = 'none')+
+  labs(color = '', x = 'X', y ='Y')
+
+ggsave(here::here('data', 'raw', '1-3_elgan-cell-outliers.jpeg'), a,
+       height = 3, width = 6)
+```
+
+
+
+# Horvath EGA
+
+Here I compute horvath age on decidua + villi samples for analysis in a future
+script.
+
+```{r}
+datClock353 <- read_csv("Z:/Amy/Data/Epigenetic Clocks/SHorvath_data/AdditionalFile3.csv")
+
+#intersection
+cpgs <- intersect(
+  datClock353 %>%
+    filter(CpGmarker != "(Intercept)") %>%
+    pull(CpGmarker),
+  rownames(villi_dec)
+)
+
+length(cpgs) # out of 353
+
+cpgs_filtered <- datClock353 %>%
+  dplyr::filter(CpGmarker %in% c("(Intercept)", cpgs)) %>%
+  dplyr::pull(CoefficientTraining)
+
+
+villi_dec_clock353 <- cbind(1, t(villi_dec[cpgs, ]))
+
+# calculate
+age <- villi_dec_clock353 %*% cpgs_filtered %>%
+  as.vector()
+age
+
+# transformation
+anti.trafo= function(x,adult.age=20) { ifelse(x<0, (1+adult.age)*exp(x)-1, (1+adult.age)*x+adult.age) }
+
+# package
+h_EGA <- tibble(Sample_Name = colnames(villi_dec),
+       horvath_EGA = anti.trafo(age))
+```
+
+# Save
+
+```{r eval = FALSE}
+write_csv(ss, here::here('data', 'raw', '1-3_ss.csv'))
+write_csv(h_EGA, here::here('data', 'raw', '1-3_horvath-epi-age.csv'))
+```
+
+## Save pca clustering info
+
+To apply to other datasets
+
+```{r, eval = FALSE}
+ss_pca <- ss_ee %>% 
+  select(Sample_Name, dataset, GSM_title, GSE_accession, GEO_accession, Sex, Tissue,
+         Trophoblasts:Syncytiotrophoblast,
+         prob_snp_outlier, controls_failed, 
+         contains('_mbd500')) %>% 
+  mutate(GEO_accession = ifelse(is.na(GEO_accession), 
+                                'GSE74738', GEO_accession)) %>%
+  filter(Tissue %in% c('Villi', 'Decidua', 'Maternal Blood'))
+
+meth_data <- data_all[dmcs_500$gene,ss_pca$Sample_Name] 
+
+write_csv(ss_pca, here::here('data', 'raw', '1-3_ss-pca.csv'))
+saveRDS(meth_data, here::here('data', 'r objects', '1-3_meth-pca.rds'))
+
+saveRDS(pca_obj, here::here('data', 'r objects', '1-3_pca_obj.rds'))
+saveRDS(dmcs_500, here::here('data', 'r objects', '1-3_dmcs_500.rds'))
+```
+
