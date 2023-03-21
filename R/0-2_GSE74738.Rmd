@@ -1,0 +1,124 @@
+---
+title: "0-2_GSE74738"
+author: "Victor Yuan"
+date: "21/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+To load and process maternal blood and decidua samples from GSE74738.
+
+# Libraries
+
+```{r}
+library(minfi)
+library(wateRmelon)
+library(ewastools)
+library(EpiDISH)
+library(tidyverse)
+library(readxl)
+library(planet)
+```
+
+
+# Data
+
+```{r}
+# read in sample sheet
+master_ss <- read_xlsx('Z:/ROBLAB6 InfiniumSequenom/Master_Sample_Sheet.xlsx')
+
+# filter rows to samples of interest
+GSE74738_mbd_ss <- master_ss %>%
+  filter(Tissue %in% c('Maternal Blood', 'Decidua'),
+         Platform == '450k')
+
+# minfi is funny, you want to convert this tibble into a DataFrame (not data.frame)
+# now you can read in the idats
+GSE74738_mbd_rgset <- read.metharray.exp(targets = DataFrame(GSE74738_mbd_ss))
+
+# I like to change the sample names, which by default is sentrix ID, into 
+# something more readable, like PM  case numbers + tissue 
+colnames(GSE74738_mbd_rgset) <- GSE74738_mbd_ss$Sample_Name
+
+# print to screen
+GSE74738_mbd_rgset
+
+
+# read as ewastools object
+GSE74738_mbd_et <- read_idats(GSE74738_mbd_ss$Basename)
+```
+
+# normalize
+
+```{r}
+GSE74738_mbd_norm <- BMIQ(preprocessNoob(GSE74738_mbd_rgset))
+```
+
+# predicted sex and genotype
+
+```{r}
+sex_geno <- function(et_object, rgset, pdata_in) {
+  
+  predicted_sex <- check_sex(et_object %>% correct_dye_bias())
+  
+  #ewastools pipeline
+  snps <- et_object$manifest[probe_type=="rs",index]
+  et_betas <- dont_normalize(et_object)
+  snps <- et_betas[snps,]
+  
+  # fit mixture model to call genotypes
+  snps_called <- call_genotypes(snps, learn = T)
+  
+  pdata_out <- pdata_in %>% 
+    mutate(prob_snp_outlier = colMeans(snps_called$outliers, na.rm = T),
+           prob_snp_outlier_logodds = snp_outliers(snps_called),
+           normalized_x_intensity = predicted_sex$X,
+           normalized_y_intensity = predicted_sex$Y,
+           controls_failed = sample_failure(control_metrics(et_object)),
+           
+           # detection p > 0.01,  failed in more than 5% of data?
+           detp_05 = colMeans(
+             minfi::detectionP(
+               rgset) >0.01) > 0.05)
+  
+  pdata_out
+}
+
+GSE74738_mbd_ss <- sex_geno(GSE74738_mbd_et, GSE74738_mbd_rgset, GSE74738_mbd_ss)
+```
+
+# epi age?
+
+```{r}
+GSE74738_mbd_ss <- GSE74738_mbd_ss %>%
+  mutate(GA_epi_RPC = planet::predictAge(GSE74738_mbd_norm),
+         GA_epi_CPC = planet::predictAge(GSE74738_mbd_norm, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(GSE74738_mbd_norm, type = 'RRPC'))
+
+GSE74738_mbd_ss %>% View
+```
+
+# cell comp
+
+```{r}
+data("plCellCpGsThird")
+cell <- epidish(
+  beta.m = GSE74738_mbd_norm[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+GSE74738_mbd_ss <- cell$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(GSE74738_mbd_ss,.)
+```
+
+# Save
+
+```{r eval = FALSE}
+write_csv(GSE74738_mbd_ss, here::here('data', 'raw', '0-2_GSE74738_mbd_ss.csv'))
+saveRDS(GSE74738_mbd_norm, here::here('data', 'r objects', '0-2_GSE74738_mbd_bmiq_noob.rds'))
+```
+
