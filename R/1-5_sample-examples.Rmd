@@ -1,0 +1,228 @@
+---
+title: "1-5_sample-examples"
+author: "Victor Yuan"
+date: "29/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+```{r, message = FALSE, warning = FALSE}
+library(pheatmap)
+library(tidyverse)
+library(viridis)
+library(ggrepel)
+
+ss <- read_csv(here::here('data', 'raw', '1-3_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+# Sample examples
+
+
+cell comp
+
+```{r}
+ss %>%
+  mutate(Flag_all = ifelse(
+    Flag_XY_contam == 'Flagged' &
+      Flag_cell_immu + Flag_cell_troph + Flag_cell_mese > 0.5 &
+      PC1_mbd500_category %in% c("+3sd < x", "+2sd < x < +3sd",
+                                 "+1sd < x < +2sd") &
+      prob_snp_outlier > 0.2,
+    1, 0)) %>%
+  
+  # filter to only datasets with those containing outliers
+  group_by(dataset) %>%
+  filter(sum(Flag_all) > 0.5) %>%
+  ungroup() %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, Outlier, Flag_all,
+         Trophoblasts:Syncytiotrophoblast) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  {
+  ggplot(data = ., aes(x = Sample_Name, y = estimate, fill = component)) +
+      
+  geom_bar(stat = 'identity',
+           width = 1) +
+      geom_bar(data = . %>% filter(Flag_all == 1),
+               aes(x = Sample_Name, y = estimate),
+               fill = 'black',
+               stat = 'identity')+
+  scale_fill_manual(values = color_code_tissue[levels(.$component)],
+                    na.value = 'grey')+
+  facet_grid(rows = vars(component), cols = vars(dataset), 
+             scale = 'free', space = 'free', switch ='y') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  #scale_x_discrete(breaks = c('PL18_vc')) +
+  theme(#axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+    legend.position = '') +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+    }
+```
+
+ genotype outlier
+ 
+```{r}
+
+ss %>%
+  mutate(Flag_all = ifelse(
+    Flag_XY_contam == 'Flagged' &
+      Flag_cell_immu + Flag_cell_troph + Flag_cell_mese > 0.5 &
+      PC1_mbd500_category %in% c("+3sd < x", "+2sd < x < +3sd",
+                                 "+1sd < x < +2sd") &
+      prob_snp_outlier > 0.2,
+    1, 0)) %>%
+  
+  # filter to only datasets with those containing outliers
+  group_by(dataset) %>%
+  filter(sum(Flag_all) > 0.5) %>%
+  ungroup() %>%
+  
+  mutate(Flag_all = as.character(Flag_all),
+         Sample_Name = fct_reorder(Sample_Name, prob_snp_outlier, .desc = TRUE)) %>%
+  
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, 
+             fill = Flag_all)) +
+  geom_bar(stat = 'identity') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(cols = vars(dataset), scales = 'free', 
+             space= 'free', switch = 'y')  +
+  scale_fill_viridis_d(option = 'A', direction = 1, end = 0.7,
+                       breaks = c(1), 
+                       labels = 'Flagged') +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')
+```
+
+cell PCA
+
+```{r}
+set.seed(1)
+ss %>%
+  mutate(Flag_all = ifelse(
+    Flag_XY_contam == 'Flagged' &
+      Flag_cell_immu + Flag_cell_troph + Flag_cell_mese > 0.5 &
+      PC1_mbd500_category %in% c("+3sd < x", "+2sd < x < +3sd",
+                                 "+1sd < x < +2sd") &
+      prob_snp_outlier > 0.2,
+    1, 0)) %>%
+  
+  # filter to only datasets with those containing outliers
+  group_by(dataset) %>%
+  filter(sum(Flag_all) > 0.5) %>%
+  ungroup() %>%
+  mutate(Flag_all = as.character(Flag_all)) %>%
+  
+  ggplot(aes(x = Flag_all, y = PC1_mbd500, color = Flag_all)) +
+  geom_jitter(
+              width = 0.25) +
+  theme_bw() +
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(cols = vars(dataset), scales = 'free', 
+             space= 'free', switch = 'y') +
+  scale_color_viridis_d(option = 'A', direction = 1, end = 0.7,
+                       breaks = c(1), 
+                       labels = 'Flagged') +
+  scale_x_discrete(labels = c('', '')) +
+  labs(x = 'Dataset', y = 'PC1', color = '')
+```
+
+E GA
+
+```{r}
+ss %>%
+  mutate(Flag_all = ifelse(
+    Flag_XY_contam == 'Flagged' &
+      Flag_cell_immu + Flag_cell_troph + Flag_cell_mese > 0.5 &
+      PC1_mbd500_category %in% c("+3sd < x", "+2sd < x < +3sd",
+                                 "+1sd < x < +2sd") &
+      prob_snp_outlier > 0.2,
+    1, 0)) %>%
+  
+  # filter to only datasets with those containing outliers
+  group_by(dataset) %>%
+  filter(sum(Flag_all) > 0.5) %>%
+  ungroup() %>%
+  mutate(Flag_all = as.character(Flag_all)) %>%
+  
+  
+  ggplot(aes(x = Flag_all, y = GA_epi_RPC, color = Flag_all)) +
+  geom_jitter(
+              width = 0.25) +
+  theme_bw() +
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(cols = vars(dataset), scales = 'free', 
+             space= 'free', switch = 'y') +
+  scale_color_viridis_d(option = 'A', direction = 1, end = 0.7,
+                       breaks = c(1), 
+                       labels = 'Flagged') +
+  scale_x_discrete(labels = c('', '')) +
+  labs(x = 'Dataset', y = 'EGA', color = '')
+  
+```
+
+
