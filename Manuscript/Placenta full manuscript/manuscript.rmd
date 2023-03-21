@@ -1,0 +1,39 @@
+---
+title: "Assessing maternal cell contamination in placental DNA methylation studies"
+output:
+  word_document
+---
+
+
+Title: Assessing maternal cell contamination in placental DNA methylation studies
+
+Authors: 
+-  Victor Yuan (1,2) (vyuan@bcchr.ca, corresponding author), 
+-  Wendy P. Robinson (1,2) (wrobinson@bcchr.ca)
+
+Affilitations:
+1.	BC Children’s Hospital Research Institute, Vancouver, BC, Canada
+2.	Department of Medical Genetics, University of British Columbia, Vancouver, BC, Canada
+
+# Abbreviations 
+
+DNAm: DNA methylation, ART: assisted reproductive technologies, ACA: acute chorioamnionitis, PE: preeclampsia, NTD: neural tube defects, EOPE: early-onset preeclampsia, LOPE: late-onset preeclampsia, IUGR: intrauterine growth restriction, SB: spina bifida, AN: anencephaly; nRBC: nucleated red blood cell. 
+
+# Abstract
+
+**Introduction**
+
+Placental DNA methylation (DNAm) plays a critical role in perinatal complications and healthy fetal development. However, maternal DNA can contaminate placental samples due to sampling technique or biological processes such as inflammation. Because of the epigenetic differences between maternal and placental tissues, maternal contamination can result in obscured measurements in DNAm studies. 
+
+**Methods**
+Data from 13 placental studies was downloaded from GEO, which were measured on the Illumina 450k or EPIC array, and included a variety of phenotypes such as preeclampsia, chorioamnionitis, and neural tube defects. Maternal contamination was assessed using several bioinformatic approaches. 59-65 SNP probes were used to assess the quality of genotype signal, which degrade with increasing maternal DNA contamination. Samples with evidence of genotype contamination were then assessed if contamination could be attributed to maternal cells using several approaches: such as XY chromosome signal intensities, estimated cell composition, epigenetic placental and adult age, and clustering with maternal tissue samples.
+
+**Results**
+Out of 11 chorionic villi datasets (n = 1,500), 9 datasets had samples with evidence of maternal contamination. Contamination measurements varied by dataset, indicating possible differences in sample processing between research groups that contribute to dataset-specific DNAm patterns. 
+
+**Discussion**
+These findings underscore the importance of identifying and addressing maternal contamination in placental DNAm studies. The various contamination approaches demonstrated in this study were highly correlated with each other. However, although each individual approach showed some amount of sensitivity to detectable maternal contamination, the sensitivity and specificity was highly variable; therefore, a systematic approach including comparison of multiple contamination measures is highly recommended.
+
+Keywords: DNA methylation, decidua, tissue processing, cell composition, chorionic villi, quality control 
+
+
