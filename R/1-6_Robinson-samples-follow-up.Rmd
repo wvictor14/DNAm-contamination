@@ -1,0 +1,147 @@
+---
+title: "Robinson samples follow up"
+author: "Victor Yuan"
+date: "16/08/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+To determine which samples to run microsatellites with
+
+```{r, message = FALSE}
+library(tidyverse)
+library(planet)
+
+ss <- read_csv(here::here('data', 'raw', '1-4_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+# 
+
+```{r}
+(ss %>%
+  filter(dataset %in% c("1", "2", "4"),
+         Tissue == 'Villi') %>%
+  group_by(dataset) %>%
+  summarize(
+            n_mbd_outlier_3sd = sum(PC1_mbd500_category %in% c(
+                                                           "+3sd < x" ),
+                                    na.rm = TRUE), 
+                                    
+            n_mbd_outlier_2sd = sum(PC1_mbd500_category %in% c(
+                                                          "+2sd < x < +3sd"  ),
+                                    na.rm = TRUE), 
+            
+            n_flagxy = sum(Flag_XY_contam == 'Flagged', na.rm =TRUE),
+            n_poutlier_01 = sum(prob_snp_outlier > 0.1, na.rm =TRUE)) %>%
+   write_csv(here::here('data', 'raw', '1-6_robinson-samples-summary-counts.csv')))
+
+library(ggrepel)
+ss %>%
+  filter(dataset %in% c("1", "2", "4"),
+         Tissue == 'Villi') %>%
+  mutate(Flag = 
+    dataset == '4' &
+      normalized_x_intensity > 0.77 &
+      normalized_y_intensity > 0.75 ) %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity)) +
+  geom_text_repel(data = ss %>% 
+                    filter(dataset == '4',
+                           normalized_x_intensity > 0.77,
+                           normalized_y_intensity > 0.75),
+                  aes(label = Sample_Name),
+                  nudge_x = 0.1) +
+  geom_point(size = 1, aes(color = Flag)) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_blank(),#element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  facet_wrap(~dataset, nrow = 1) +
+  scale_color_manual(values = c('TRUE' = 'red', 'FALSE' = 'grey'), guide = 'none') +
+  scale_x_continuous(breaks = c(0.8, 1)) +
+  labs(color = '', 
+       x = 'X normalized intensity', y ='Y\nnormalized\nintensity')
+
+#flag the two samples in dataset 4
+ss <- ss %>%
+  mutate(Flag_XY_lenient = 
+    dataset == '4' &
+      normalized_x_intensity > 0.77 &
+      normalized_y_intensity > 0.75)
+
+(ss %>%
+  filter(dataset %in% c("1", "2", "4"),
+         Tissue == 'Villi',
+         
+         PC1_mbd500_category %in% c("+2sd < x < +3sd",
+                                    "+3sd < x" ) | 
+           Flag_XY_contam == 'Flagged' |
+           prob_snp_outlier > 0.1 |
+           Flag_EGA_adult |
+           Flag_XY_lenient) %>%
+  select(Sample_Name, dataset, dataset_label,
+         PC1_mbd500_category, 
+         Flag_XY, Flag_XY_contam, Flag_XY_lenient,
+         Flag_EGA_adult,
+         Sex, prob_snp_outlier) %>%
+    arrange(dataset, prob_snp_outlier) %>%
+  write_csv(here::here('data', 'raw', '1-6_robinson-flagged-samples-list.csv'),
+            na = ''))
+
+(p <- ss %>%
+  filter(dataset %in% c("1", "2", "4"),
+         Tissue == 'Villi') %>%
+  mutate(label = ifelse(
+    PC1_mbd500_category %in% c("+2sd < x < +3sd", "+3sd < x" ) |
+      Flag_XY_contam == 'Flagged' |
+      prob_snp_outlier > 0.1,
+    
+    "follow-up samples",
+    "")) %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity,
+             color = label)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        #panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  facet_wrap(~ dataset) +
+  scale_x_continuous(breaks = c(0.7, 0.9, 1.1)) +
+  labs(color = '', x = 'Intensity from X', y ='Intensity from Y'))
+
+ggsave(here::here('data', 'raw', '1-6_follow-up-samples-xy-plot.png'),
+       plot = p)
+```
+
+# Controls
+
+```{r}
+(ss %>%
+  filter(dataset %in% c("1", "2", "4"),
+         Tissue == 'Villi') %>%
+  
+  select(Sample_Name, dataset, dataset_label,
+         PC1_mbd500_category, 
+         Flag_XY, Flag_XY_contam, Flag_XY_lenient,
+         Flag_EGA_adult,
+         Sex, prob_snp_outlier) %>%
+  arrange(dataset, prob_snp_outlier) %>% 
+  write_csv(here::here('data', 'raw', '1-6_robinson-all-samples-list.csv'),
+            na = ''))
+```
+
