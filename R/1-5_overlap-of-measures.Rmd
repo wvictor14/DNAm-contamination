@@ -1,0 +1,83 @@
+---
+title: "1-5_overlap-of-measures"
+author: "Victor Yuan"
+date: "02/09/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(pheatmap)
+library(tidyverse)
+library(viridis)
+
+ss <- read_csv(here::here('data', 'raw', '1-4_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+```{r}
+colnames(ss)
+
+(a<- ss %>%
+  filter(Tissue == 'Villi',
+         !Sample_Name %in% c('FT28_vc', 'GSM2628108', 'GSM2628103')) %>%
+  
+  select(Sample_Name, Tissue, dataset, controls_failed,
+         prob_snp_outlier, 
+         horvath_EGA, Flag_EGA_adult, 
+         Flag_XY_contam, 
+         PC1_mbd500_category,
+         
+         ) %>%
+  mutate(poutlier = prob_snp_outlier > 0.15,
+         Flag_XY_contam = !is.na(Flag_XY_contam),
+         PCA_outlier = PC1_mbd500_category %in% c(#'+1sd < x < +2sd',
+                                                  '+2sd < x < +3sd',
+                                                  '+3sd < x'),
+         Sample_Name = fct_reorder(Sample_Name, desc(prob_snp_outlier)))  %>%
+  
+  
+  pivot_longer(cols = c(poutlier, Flag_XY_contam, PCA_outlier,
+                        Flag_EGA_adult),
+               names_to = 'measure',
+               values_to = 'flagged') %>%
+  
+  mutate(measure = factor(measure, c('Flag_XY_contam', 'Flag_EGA_adult', 
+                                          'PCA_outlier',  
+                                          'poutlier')),
+         flagged = ifelse(flagged == FALSE, NA, flagged)) %>%
+    #drop_na(flagged) %>%
+  
+  ggplot(aes(x = Sample_Name, y = measure, fill = flagged)) +
+  geom_tile() +
+  #facet_grid(cols = vars(dataset), space = 'free') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.border = element_blank(),
+        panel.grid = element_blank(),
+        #panel.background = element_rect(fill = '#DEDEDE'),
+        ) +
+  scale_fill_manual(values = c('TRUE' = 'red', 'FALSE' = '#DEDEDE'),
+                    na.value = '#DEDEDE',
+                    guide = 'none') +
+  scale_y_discrete(expand = c(0.01,0.01),
+                   labels = c('XY', 'Epigenetic\nage', 'PCA', 'P(outlier)')) +
+  labs(x = 'Samples', y = ''))
+  
+
+ss%>%
+  filter(Tissue == 'Villi') %>%
+  group_by(dataset) %>%
+  summarize(sum(Flag_EGA_adult == TRUE))
+  
+```
+
