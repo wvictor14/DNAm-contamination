@@ -1,0 +1,485 @@
+---
+title: "0-1_normalize"
+author: "Victor Yuan"
+date: "July 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Load data
+
+```{r}
+library(minfi)
+library(wateRmelon)
+library(tidyverse)
+library(here)
+library(EpiDISH)
+library(planet)
+```
+
+```{r, eval = F}
+rgset_ACA <- readRDS(here::here('data', 'r objects', '0-0_rgset-ACA.rds'))
+rgset_GSE100197 <- readRDS(here::here('data', 'r objects', '0-0_rgset-GSE100197.rds'))
+rgset_GSE98224 <- readRDS(here::here('data', 'r objects', '0-0_rgset-GSE9822.rds'))
+rgset_NTD <- readRDS(here::here('data', 'r objects', '0-0_rgset-NTD.rds'))
+rgset_GSE113600 <- readRDS(here::here('data', 'r objects', '0-0_rgset-GSE113600.rds'))
+rgset_GSE120250 <- readRDS(here::here('data', 'r objects', '0-0_rgset-GSE120250.rds'))
+rgset_reps_EPIC <- readRDS(here::here('data', 'r objects', '0-0_rgset-reps-850k.rds'))
+rgset_reps_450k <- readRDS(here::here('data', 'r objects', '0-0_rgset-reps-450k.rds'))
+rgset_vm <- readRDS(here::here('data', 'r objects', '0-0_rgset-vm.rds'))
+```
+
+```{r} 
+ss <- readRDS(here::here('data', 'r objects', '1-0_ss.rds'))
+ss_ACA <- readRDS(here::here('data', 'r objects', '0-0_ss-ACA.rds'))
+ss_GSE100197 <- readRDS(here::here('data', 'r objects', '0-0_ss-GSE100197.rds'))
+ss_GSE98224 <- readRDS(here::here('data', 'r objects', '0-0_ss-GSE98224.rds'))
+ss_ntd <- readRDS(here::here('data', 'r objects', '0-0_ss-NTD.rds'))
+ss_GSE113600 <- readRDS(here::here('data', 'r objects', '0-0_ss-GSE113600.rds'))
+ss_GSE120250 <- readRDS(here::here('data', 'r objects', '0-0_ss-GSE120250.RDS'))
+ss_reps_450k <- readRDS(here::here('data', 'r objects', '0-0_ss-reps-450k.rds'))
+ss_reps_850k <- readRDS(here::here('data', 'r objects', '0-0_ss-reps-850k.rds'))
+
+ss_vm <- readRDS(here::here('data', 'r objects', '0-0_ss-vm.rds'))
+```
+
+## July 2021 update, extra datasets
+
+```{r, eval = F}
+rgset_GSE98938<- readRDS(
+  'Z:/7_ExternalData/GSE98938/GSE98938_rgset_extended.rds')
+rgset_GSE75248 <- readRDS(
+  'Z:/7_ExternalData/GSE75248/GSE75248_rgsetextended.rds')
+rgset_GSE71678 <- readRDS(
+  'Z:/7_ExternalData/GSE71678/GSE71678_rgsetextended.rds')
+rgset_GSE93208  <- readRDS(
+  'Z:/7_ExternalData/GSE93208/GSE93208_rgset_extended.rds')
+rgset_GSE167885  <- readRDS(
+  'Z:/7_ExternalData/GSE167885/GSE167885_rgset_extended.rds')
+rgset_GSE125605  <- readRDS(
+  'Z:/7_ExternalData/GSE125605/GSE125605_rgset_extended.rds')
+rgset_GSE75196 <- readRDS(
+  'Z:/7_ExternalData/GSE75196/GSE75196_rgset_extended.rds')
+```
+
+```{r}
+ss_GSE98938 <- read_csv('Z:/7_ExternalData/GSE98938/GSE98938_ss.csv')
+ss_GSE75248 <- read_csv('Z:/7_ExternalData/GSE75248/GSE75248_ss.csv')
+ss_GSE71678 <- read_csv('Z:/7_ExternalData/GSE71678/GSE71678_ss.csv')
+ss_GSE93208 <- read_csv('Z:/7_ExternalData/GSE93208/GSE93208_ss.csv')
+ss_GSE167885 <- read_csv('Z:/7_ExternalData/GSE167885/GSE167885_ss.csv')
+ss_GSE125605 <- read_csv('Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+ss_GSE75196 <- read_csv('Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+```
+
+
+# noob
+
+```{r, eval = F}
+noob_ACA <- preprocessNoob(rgset_ACA)
+noob_GSE100197 <- preprocessNoob(rgset_GSE100197)
+noob_GSE98224 <- preprocessNoob(rgset_GSE98224)
+noob_NTD <- preprocessNoob(rgset_NTD)
+noob_GSE113600 <- preprocessNoob(rgset_GSE113600)
+noob_GSE120250 <- preprocessNoob(rgset_GSE120250)
+noob_reps_EPIC <- preprocessNoob(rgset_reps_EPIC)
+noob_reps_450k <- preprocessNoob(rgset_reps_450k)
+noob_vm <- preprocessNoob(rgset_vm)
+```
+
+## July 2021
+
+```{r eval = F}
+noob_GSE98938 <- preprocessNoob(rgset_GSE98938)
+noob_GSE75248 <- preprocessNoob(rgset_GSE75248)
+noob_GSE71678 <- preprocessNoob(rgset_GSE71678)
+noob_GSE93208 <- preprocessNoob(rgset_GSE93208)
+noob_GSE167885 <- preprocessNoob(rgset_GSE167885)
+noob_GSE125605 <- preprocessNoob(rgset_GSE125605)
+noob_GSE75196 <- preprocessNoob(rgset_GSE75196)
+```
+
+# bmiq
+
+```{r, eval = F}
+bmiq_ACA <- BMIQ(noob_ACA)
+bmiq_GSE100197 <- BMIQ(noob_GSE100197)
+bmiq_GSE98224 <- BMIQ(noob_GSE98224)
+bmiq_NTD <- BMIQ(noob_NTD)
+bmiq_GSE113600 <- BMIQ(noob_GSE113600)
+bmiq_GSE120250 <- BMIQ(noob_GSE120250)
+bmiq_reps_EPIC <- BMIQ(noob_reps_EPIC)
+bmiq_reps_450k <- BMIQ(noob_reps_450k)
+bmiq_vm <- BMIQ(noob_vm)
+```
+
+## July 2021
+
+```{r eval = F}
+bmiq_GSE98938 <- BMIQ(noob_GSE98938)
+bmiq_GSE75248 <- BMIQ(noob_GSE75248)
+bmiq_GSE71678 <- BMIQ(noob_GSE71678)
+bmiq_GSE93208 <- BMIQ(noob_GSE93208)
+bmiq_GSE167885 <- BMIQ(noob_GSE167885)
+bmiq_GSE125605 <- BMIQ(noob_GSE125605)
+bmiq_GSE75196 <- BMIQ(noob_GSE75196)
+```
+
+# make sample names as column names
+
+```{r, eval = F}
+colnames(bmiq_ACA) == paste0(ss_ACA$Sentrix_ID, '_', ss_ACA$Sentrix_Position)
+colnames(bmiq_ACA) <- ss_ACA$Sample_Name
+colnames(bmiq_GSE100197) == paste0(ss_GSE100197$Sentrix_ID, '_', ss_GSE100197$Sentrix_Position)
+colnames(bmiq_GSE100197) <- ss_GSE100197$Sample_Name
+
+colnames(bmiq_GSE98224) == paste0(ss_GSE98224$Slide, '_', ss_GSE98224$Array)
+colnames(bmiq_GSE98224) <- ss_GSE98224$ParticipantID
+
+colnames(bmiq_NTD) == paste0(ss_ntd$Sentrix_ID, '_', ss_ntd$Sentrix_Position)
+colnames(bmiq_NTD) <- ss_ntd$Sample_Name
+
+colnames(bmiq_reps_EPIC) == paste0(ss_reps_850k$Sentrix_ID, '_', ss_reps_850k$Sentrix_Position)
+colnames(bmiq_reps_EPIC) <- ss_reps_850k$Sample_Name
+
+colnames(bmiq_reps_450k) == paste0(ss_reps_450k$Sentrix_ID, '_', ss_reps_450k$Sentrix_Position)
+colnames(bmiq_reps_450k) <- ss_reps_450k$Sample_Name
+
+gsub('_.*', '', colnames(bmiq_GSE113600)) == ss_GSE113600$GSM
+colnames(bmiq_GSE113600) <- ss_GSE113600$GSM
+
+all(colnames(bmiq_vm) == ss_vm$Sample_Name) 
+colnames(bmiq_vm) <- ss_vm$Sample_Name
+```
+
+## July 2021
+
+```{r eval = F}
+colnames(bmiq_GSE98938)
+ss_GSE98938$Sample_Name == colnames(bmiq_GSE98938)
+all(str_extract(colnames(bmiq_GSE75248), "GSM[0-9]+") == ss_GSE75248$Sample_Name)
+colnames(bmiq_GSE75248) <- ss_GSE75248$Sample_Name
+all(str_extract(colnames(bmiq_GSE71678), "GSM[0-9]+") == ss_GSE71678$Sample_Name)
+colnames(bmiq_GSE71678) <- ss_GSE71678$Sample_Name
+
+colnames(bmiq_GSE93208)  == ss_GSE93208$Sample_Name
+all(colnames(bmiq_GSE167885) == ss_GSE167885$Sample_Name)
+all(colnames(bmiq_GSE125605) == ss_GSE125605$Sample_Name)
+all(colnames(bmiq_GSE75196) == ss_GSE75196$Sample_Name) 
+```
+
+# Save
+```{r, eval = F}
+saveRDS(bmiq_ACA, here::here('data', 'r objects', '0-1_bmiq-ACA.rds'))
+saveRDS(bmiq_GSE100197 , here::here('data', 'r objects', '0-1_bmiq-GSE100197.rds'))
+saveRDS(bmiq_GSE98224 , here::here('data', 'r objects', '0-1_bmiq-GSE98224.rds'))
+saveRDS(bmiq_NTD , here::here('data', 'r objects', '0-1_bmiq-NTD.rds'))
+saveRDS(bmiq_GSE113600 , here::here('data', 'r objects', '0-1_bmiq-GSE113600.rds'))
+saveRDS(bmiq_GSE120250, here::here('data', 'r objects', '0-1_bmiq-GSE120250.rds'))
+saveRDS(bmiq_reps_EPIC, here::here('data', 'r objects', '0-1_bmiq-reps_EPIC.rds')) 
+saveRDS(bmiq_reps_450k, here::here('data', 'r objects', '0-1_bmiq-reps_450k.rds')) 
+saveRDS(bmiq_vm, here::here('data', 'r objects', '0-1_bmiq-vm.rds'))
+
+saveRDS(bmiq_GSE98938,here::here('data', 'r objects', '0-1-bmiq_GSE98938.rds')) 
+saveRDS(bmiq_GSE75248,here::here('data', 'r objects', '0-1-bmiq_GSE75248.rds')) 
+saveRDS(bmiq_GSE71678,here::here('data', 'r objects', '0-1-bmiq_GSE71678.rds')) 
+saveRDS(bmiq_GSE93208,here::here('data', 'r objects', '0-1-bmiq_GSE93208.rds')) 
+saveRDS(bmiq_GSE167885,here::here('data', 'r objects', '0-1-bmiq_GSE167885.rds')) 
+saveRDS(bmiq_GSE125605,here::here('data', 'r objects', '0-1-bmiq_GSE125605.rds')) 
+saveRDS(bmiq_GSE75196,here::here('data', 'r objects', '0-1-bmiq_GSE75196.rds')) 
+```
+
+# read in
+```{r, eval = TRUE}
+bmiq_ACA <- readRDS(here::here('data', 'r objects', '0-1_bmiq-ACA.rds'))
+bmiq_GSE100197 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE100197.rds'))
+bmiq_GSE98224 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE98224.rds'))
+bmiq_NTD <- readRDS(here::here('data', 'r objects', '0-1_bmiq-NTD.rds'))
+bmiq_GSE113600 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE113600.rds'))
+bmiq_GSE120250 <- readRDS(here::here('data', 'r objects', '0-1_bmiq-GSE120250.rds'))
+bmiq_reps_EPIC <- readRDS(here::here('data', 'r objects', '0-1_bmiq-reps_EPIC.rds')) 
+bmiq_reps_450k <- readRDS(here::here('data', 'r objects', '0-1_bmiq-reps_450k.rds')) 
+saveRDS(bmiq_vm, here::here('data', 'r objects', '0-1_bmiq-vm.rds'))
+
+bmiq_GSE98938 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE98938.rds')) 
+bmiq_GSE75248 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE75248.rds')) 
+bmiq_GSE71678 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE71678.rds')) 
+bmiq_GSE93208 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE93208.rds')) 
+bmiq_GSE167885 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE167885.rds')) 
+bmiq_GSE125605 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE125605.rds')) 
+bmiq_GSE75196 <- readRDS(here::here('data', 'r objects', '0-1-bmiq_GSE75196.rds')) 
+```
+
+# Cell comp
+
+```{r}
+data("plCellCpGsThird")
+data("plCellCpGsFirst")
+cell_ACA <- epidish(
+  beta.m = bmiq_ACA[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE100197 <- epidish(
+  beta.m = bmiq_GSE100197[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE98224 <- epidish(
+  beta.m = bmiq_GSE98224[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_NTD <- epidish(
+  beta.m = bmiq_NTD[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE113600 <- epidish(
+  beta.m = bmiq_GSE113600[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE120250 <- epidish(
+  beta.m = bmiq_GSE120250[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_reps_EPIC <-epidish(
+  beta.m = bmiq_reps_EPIC[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_reps_450k <- epidish(
+  beta.m = bmiq_reps_450k[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+cell_vm <- epidish(
+  beta.m = bmiq_vm[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+######
+
+cell_GSE98938 <- epidish(
+  beta.m = bmiq_GSE98938[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE75248 <- epidish(
+  beta.m = bmiq_GSE75248[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+cell_GSE71678 <- epidish(
+  beta.m = bmiq_GSE71678[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE93208 <- epidish(
+  beta.m = bmiq_GSE93208[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+cell_GSE167885 <- epidish(
+  beta.m = bmiq_GSE167885[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+cell_GSE125605 <- epidish(
+  beta.m = bmiq_GSE125605[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+cell_GSE75196 <- epidish(
+  beta.m = bmiq_GSE75196[rownames(plCellCpGsThird),],
+  ref.m = plCellCpGsThird,
+  method = 'RPC')
+
+
+ss_ACA <- cell_ACA$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_ACA,.)
+
+ss_GSE98224 <- cell_GSE98224$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE98224 %>% rename(Sample_Name = ParticipantID),.)
+
+ss_GSE100197 <- cell_GSE100197$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE100197,.)
+ss_GSE120250 <- cell_GSE120250$estF  %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE120250 %>% mutate(Sample_Name = geo_accession),.) %>%
+  select(-sample_name)
+
+ss_ntd <- cell_NTD$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_ntd,.)
+ss_GSE113600 <- cell_GSE113600$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE113600 %>% rename(Sample_Name = GSM),.)
+
+ss_reps_850k <- cell_reps_EPIC$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_reps_850k,.)
+ss_reps_450k <- cell_reps_450k$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_reps_450k,.)
+ss_GSE98938 <- cell_GSE98938$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE98938,.)
+ss_GSE75248 <- cell_GSE75248$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE75248,.)
+ss_GSE71678 <- cell_GSE71678$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE71678,.)
+ss_GSE93208 <- cell_GSE93208$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE93208,.)
+ss_GSE167885 <- cell_GSE167885$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE167885,.)
+ss_GSE125605 <- cell_GSE125605$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE125605,.)
+ss_GSE75196 <- cell_GSE75196$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_GSE75196,.)
+
+ss_vm <- cell_vm$estF %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'Sample_Name') %>%
+  as_tibble() %>%
+  left_join(ss_vm,.)
+```
+
+# epi GA
+
+```{r}
+ss_ACA <- ss_ACA %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_ACA),
+         GA_epi_CPC = planet::predictAge(bmiq_ACA, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_ACA, type = 'RRPC'))
+
+ss_GSE100197 <- ss_GSE100197 %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE100197),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE100197, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE100197, type = 'RRPC'))
+
+ss_GSE98224 <- ss_GSE98224 %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE98224),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE98224, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE98224, type = 'RRPC'))
+
+ss_ntd <- ss_ntd %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_NTD),
+         GA_epi_CPC = planet::predictAge(bmiq_NTD, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_NTD, type = 'RRPC'))
+
+ss_GSE113600 <- ss_GSE113600 %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE113600),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE113600, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE113600, type = 'RRPC'))
+
+ss_GSE120250 <- ss_GSE120250 %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE120250),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE120250, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE120250, type = 'RRPC'))
+
+ss_reps_850k <- ss_reps_850k %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_reps_EPIC),
+         GA_epi_CPC = planet::predictAge(bmiq_reps_EPIC, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_reps_EPIC, type = 'RRPC'))
+
+ss_reps_450k <- ss_reps_450k %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_reps_450k),
+         GA_epi_CPC = planet::predictAge(bmiq_reps_450k, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_reps_450k, type = 'RRPC'))
+####
+ss_GSE98938 <- ss_GSE98938 %>% 
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE98938),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE98938, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE98938, type = 'RRPC'))
+ss_GSE75248 <- ss_GSE75248 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE75248),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE75248, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE75248, type = 'RRPC'))
+ss_GSE71678 <- ss_GSE71678 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE71678),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE71678, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE71678, type = 'RRPC'))
+ss_GSE93208 <- ss_GSE93208 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE93208),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE93208, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE93208, type = 'RRPC'))
+ss_GSE167885 <- ss_GSE167885 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE167885),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE167885, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE167885, type = 'RRPC'))
+ss_GSE125605 <- ss_GSE125605 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE125605),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE125605, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE125605, type = 'RRPC'))
+ss_GSE75196 <- ss_GSE75196 %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_GSE75196),
+         GA_epi_CPC = planet::predictAge(bmiq_GSE75196, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_GSE75196, type = 'RRPC'))
+ss_vm <- ss_vm %>%
+  mutate(GA_epi_RPC = planet::predictAge(bmiq_vm),
+         GA_epi_CPC = planet::predictAge(bmiq_vm, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(bmiq_vm, type = 'RRPC'))
+```
+
+# Save
+
+```{r}
+saveRDS(ss_ACA, here::here('data', 'r objects', '0-1_ss-ACA.rds'))
+write_csv(ss_GSE100197, 'Z:/7_ExternalData/GSE100197/GSE100197_metadata.csv' )
+write_csv(ss_GSE98224, 'Z:/7_ExternalData/GSE98224/GSE98224_metadata.csv')
+saveRDS(ss_ntd, here::here('data', 'r objects', '0-1_ss-NTD.rds'))
+write_csv(ss_GSE113600, 'Z:/7_ExternalData/GSE113600/GSE113600_metadata.csv')
+write_csv(ss_GSE120250, 'Z:/7_ExternalData/GSE120250/GSE120250_metadata.csv')
+saveRDS(ss_reps_850k, here::here('data', 'r objects', '0-1_ss-reps-850k.rds'))
+saveRDS(ss_reps_450k, here::here('data', 'r objects', '0-1_ss-reps-450k.rds'))
+
+####
+write_csv(ss_GSE98938, 'Z:/7_ExternalData/GSE98938/GSE98938_ss.csv')
+write_csv(ss_GSE75248, 'Z:/7_ExternalData/GSE75248/GSE75248_ss.csv')
+write_csv(ss_GSE71678, 'Z:/7_ExternalData/GSE71678/GSE71678_ss.csv')
+write_csv(ss_GSE93208, 'Z:/7_ExternalData/GSE93208/GSE93208_ss.csv')
+write_csv(ss_GSE167885, 'Z:/7_ExternalData/GSE167885/GSE167885_ss.csv')
+write_csv(ss_GSE125605, 'Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+write_csv(ss_GSE75196, 'Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+
+write_csv(ss_vm, here::here('data', 'r objects', '0-1_ss-vm.csv'))
+```
+
