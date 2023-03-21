@@ -1,0 +1,112 @@
+---
+title: "Additional robinson samples"
+author: "Victor Yuan"
+date: "26/10/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+To add additional robinson samples that have high contamination
+
+```{r, message = FALSE}
+library(tidyverse)
+library(planet)
+library(ggrepel)
+
+ss <- read_csv(here::here('data', 'raw', '1-4_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+## ACA
+
+pl31 is that weird sample that chaini removed,
+
+pl31_vc is not contaminated but include anyways
+
+other samples are non-villi samples with high p(outlier)
+
+```{r}
+ss %>% filter(prob_snp_outlier_logodds > -4) %>%
+  select(Sample_Name:prob_snp_outlier_logodds) 
+
+ss %>%
+  filter(Sample_Name %in% c("PL31_vc", "PL31_amc", "PL31_chc",
+                            "PL56_amc", "PL91_amc")) %>%
+  arrange(Sample_Name) %>%
+  select(Sample_Name, prob_snp_outlier, prob_snp_outlier_logodds, Sex, GA, 
+         GA, GA_cat, Tissue,
+         normalized_x_intensity, normalized_y_intensity)  %>%
+  
+  write_csv(here::here('data', 'raw', '1-8_ACA-contam-samples.csv'))
+```
+
+PL31_vc
+PL31_am
+PL31_chc
+PL56_amc
+PL91_amc
+
+## Cells
+
+```{r}
+cells_pdat <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/1_1_pDat.rds')
+
+ggplot(cells_pdat, aes(x = normalized_X_intensity, y= normalized_Y_intensity, color = Sex)) +
+  geom_point() + theme_bw() +
+  labs(color = 'Reported Sex')
+
+cells_pdat %>% arrange(Tissue, desc(Prob_SNP_outlier)) %>% 
+  mutate(Sample_Name = factor(as.character(Sample_Name), levels = Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = Prob_SNP_outlier, color = Tissue)) +
+  geom_point() +
+  scale_color_brewer(palette = 'Set1') +
+  scale_y_continuous(expand = c(0.01, 0.01), limits = c(0, 0.6)) +
+  facet_grid(~Trimester, scales = 'free_x', space = 'free_x') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank()) 
+
+cells_pdat %>%
+  filter(Prob_SNP_outlier > 0.2) %>%
+  arrange(Tissue, desc(Prob_SNP_outlier)) %>% 
+  mutate(Sample_Name = factor(as.character(Sample_Name), levels = Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = Prob_SNP_outlier, color = Tissue)) +
+  geom_point() +
+  scale_color_brewer(palette = 'Set1') +
+  scale_y_continuous(expand = c(0.01, 0.01), limits = c(0, 0.6)) +
+  facet_grid(~Trimester, scales = 'free_x', space = 'free_x') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank()) 
+
+
+cells_pdat %>%
+  filter(Prob_SNP_outlier > 0.3,
+         !Tissue %in% c("Dead Cells and Lymphocytes", "Mixture"))  %>%
+  count(Trimester, Tissue)
+
+cells_pdat %>%
+  filter(Prob_SNP_outlier > 0.3,
+         !Tissue %in% c("Dead Cells and Lymphocytes", "Mixture"))  %>%
+  select(Sample_Name, Case_ID, Prob_SNP_outlier, Prob_SNP_outlier_Logodds, 
+         Sex, GA, Trimester, Tissue,
+         normalized_X_intensity, normalized_Y_intensity) %>%
+  write_csv(here::here('data', 'raw', '1-8_cells-contam-samples.csv'))
+
+cells_pdat %>%
+  filter(Tissue == 'Villi maternal') %>%
+  select(Sample_Name, Case_ID, Prob_SNP_outlier, Prob_SNP_outlier_Logodds, 
+         Sex, GA, Trimester, Tissue,
+         normalized_X_intensity, normalized_Y_intensity)
+```
+
