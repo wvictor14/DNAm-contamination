@@ -1,0 +1,650 @@
+---
+title: "Estimating contamination in placenta methylation data"
+author: "Victor Yuan"
+date: "06/08/2020"
+output:
+  html_document:
+    keep_md: false
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+    theme: spacelab
+    self_contained: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include = FALSE}
+library(tidyverse)
+ss <- readRDS(here::here('data', 'r objects', '1-1_ss.rds'))
+library(cowplot)
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE
+)
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+```
+
+# Key points
+
+- 5 public placental DNA methylation datasets were collected and used to assess how often maternal DNA can be detected in placental samples
+- Genetically-inferred maternal contamination is not statistically associated with biological variables tested within each dataset. This includes Preeclampsia, Acute Chorioamnionitis, NTD, in vivo vs in vitro fertilization
+- However, there was a significant number of samples that have high levels of contamination
+- Some, but not all of these samples were also associated with an "uncharacteristic" (usually a high immune component) cell composition profile
+- These bioinformatic tools can improve the quality of methylation analysis through the identification of samples that may be confounded by high maternal contamination and/or altered cell composition
+
+# Intro
+
+Here we use three bioinformatic tools to identify samples that have contamination from other samples, mainly from maternal cells. This is valuable to do so in any methylation study because contamination from maternal cells will alter measure methylation which may obscure associations that the researcher is interested in identifying, or it may be of biological interest since maternal immune cells infiltration into the placenta is sometimes associated with placental inflammation.
+
+# Datasets
+
+First, I'll mention that I titled and abbreviated the datasets. Here is a list of abbreviations:
+
+ACA: acute spontaneous abortion  
+SB: spina bifida  
+AN: anencephaly  
+EOPE: early-onset preeclampsia  
+LOPE: late-ochorioamnionitis  
+NTD: neural tube defects  
+PE: preeclampsia  
+ART: assisted reproductive technologies  
+RSA: recurrent nset preeclampsia
+
+Below is a table describing the 5 placental datasets. They consist of mostly villi + some other placental tissues. 
+
+|                        |     Acute Chorioamnionitis                 |     Neural Tube Defects            |     Preeclampsia 1                          |     Preeclampsia 2                 |     Assisted Reproductive   Technologies    |     Recurrent Spontaneous Abortion    |
+|------------------------|--------------------------------------------|------------------------------------|---------------------------------------------|------------------------------------|---------------------------------------------|---------------------------------------|
+|     **Publication**        |     Konwar C 2018                          |     Price M 2016                   |     Wilson S 2018                           |     Leavey K 2018                  |     Choufani S 2019                         |     Yu M 2018                         |
+|     **GEO accession**      |     GSE115508                              |     GSE69502                       |     GSE100197                               |     GSE98224                       |     GSE120250                               |     GSE113600                         |
+|     **Samples**            |     22 ACA, 22 non-ACA                     |     22 SB, 15 AN, 19 non-NTD       |     22 EOPE, 18 LOPE, 11 IUGR, 43 non-PE    |     22 EOPE, 11 LOPE, 15 non-PE    |     44 ART, 44 healthy                      |     4 unexplained, 2 normal           |
+|     **Array**              |     850k                                   |     450k                           |     450k                                    |     450k                           |     450k                                    |     850k                              |
+|     **Tissue**             |     Villi, 16/44 matched amnion/chorion    |     Villi                          |     Villi                                   |     Villi                          |     Villi                                   |     Decidua                           |
+|     **Gestational age**    |     Preterm                                |     2nd   trimester (14-26 wks)    |     Preterm / term                          |     Preterm / term                 |     Term                                    |     First Trimester                   |
+
+# Sex probes intensity
+
+The first tool is using normalized XY intensity, which is the total intensity from sex chromosome probes, in relation to the total intensity from the autosmal probes. Normalizing to autosomal intensity allows us to account for sample-to-sample differences that influence total probe intensity (e.g. more hybridized DNA = higher intensities). This measure helps identify contaminated samples when the contaminating DNA is from a person of different sex than the primary sample. So if a sample from a placenta from a male fetus is contaminated with maternal cells, we should see higher X intensity.
+
+```{r}
+ss %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, color = dataset_label_short)) +
+  geom_point()  +
+  scale_color_brewer(palette = 'Dark2') +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  guides(color = guide_legend(override.aes = list(size = 3.5))) +
+  labs(color = '', x = 'Intensity from X', y ='Intensity from Y')
+```
+
+Here we can see that XY intensity (normalized to autosomal intensity) shows an obvious dataset-specific effect -- mainly for the ACA and RSA datasets. I'm not sure why or how that is possible. However, what that means is that this measure is best examined within each dataset separately, and that outliers should only be considered relative to other samples of similar processing or batch. 
+
+Although there are some obvious outliers in this plot, none of these outliers are in the area where we would expect if they are contaminated with DNA from the opposite sex (area along diagonal between top left and bottom right). If we were processing this data, I would flag these samples since they may be poorer quality or have some other reason why they appear as outliers.
+
+# Genotyping probes
+
+The second tool that we can use is measuring the amount of "noise" in the SNP probe distributions. This has been described by Jonathan Heiss 2018 and implemented in his package *ewastools*, which we used in many of these analyses. Basically, as a sample of DNA becomes more and more contaminated with other DNA that is genetically distinct, we expect that the SNP probes will distributed in a "messier" manner. Instead of falling on 3 peaks (around 0.3, 0.5, and 0.7), some SNPs will increasingly fall in between these peaks. The amount of deviation from these peaks can be quantified and serve as measure of how much contaminating DNA is present in the sample.
+
+For this tool the output is something called the "probability of a SNP being an outlier" which is our measure of contaminating DNA in a sample. Statistically, this measure can range from 0 to 1, but the actual range of this value depends on the how genetically distinct the contaminating DNA is. For that reason it is a bit difficult to directly interpret this measure, but we can still compare it relative to other samples to identify big outliers.
+
+The below graphic shows the distribution of this genetic-based measure of contamination across all samples, datasets, and tissues. 
+
+```{r}
+ss %>% 
+  arrange(dataset_label_short, Tissue_gen2, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, fill = Tissue_gen2)) +
+  geom_bar(stat = 'identity') +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        #axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  facet_grid(~dataset_label_short, scales = 'free', space= 'free', switch = 'x')  +
+  scale_fill_viridis_d() +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+  labs(fill ='', x= 'Samples', y = 'P(outlier)')
+```
+
+It's clear that there are is lots of variation, both between datasets and within. Is this variation due to technical differences, such as how the sample was obtained or the DNA was prepared? Is some of this variation due to biological reasons, such as varying degrees of inflammation, leading to increase maternal cells infiltrating into the placenta? 
+
+Below I show the analysis of comparing this measure between different biological groups, within each study. No statistically significant associations (p<0.05) were found, however there were obvious outliers in each group/study. These results suggest that if there is maternal infiltration due to biology factors, the associations are too weak that can be detected using this measure. 
+
+```{r, fig.height = 10}
+ss %>% 
+  filter(!is.na(Group)) %>%
+  ggplot(aes(x = Group, y = prob_snp_outlier), show.legend = FALSE) +
+  geom_boxplot(aes(fill = Tissue_gen2), outlier.shape = NA) +
+  geom_jitter(width = 0.2) +
+  #stat_summary(fun = "mean",
+  #             fun.min = function(x){mean(x)-sd(x, na.rm = TRUE)},
+  #             fun.max = function(x){mean(x)+sd(x, na.rm = TRUE)},
+  #             position = position_nudge(x = 0.3),
+  #             show.legend = FALSE) +
+  facet_wrap(~dataset_label_short + Tissue, scales = 'free', ncol = 3) +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.line = element_line(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_rect(color = NA, fill = NA),
+        strip.text = element_text(hjust = 0),
+        strip.placement = 'outside',
+        legend.position = 'top') +
+  scale_y_continuous(limits = c(-0.01, 0.3)) +
+  scale_fill_viridis_d(begin = 0.3) +
+  labs(color ='', fill = '', x= '', y = 'P(outlier)')
+```
+
+
+# Cell compsition
+
+There are some samples that appear to have genotype profiles that suggest contamination. It is difficult to determine if this is contamination from other samples of same tissue source (villi) or if this is due to maternal contamination. However, if this contamination is from a different tissue (decidua), we should expect that their cell composition profile is also changed. We should be able to detect this if we estimate cell composition from methylation. This should help us understand why some of these outliers exist.
+
+First we take a look at an acute chorioamnionitis dataset (n=48) with a subset (n=15) of villi samples having matched amnion and chorion.
+
+I've highlighted samples that have high contamination (probability of snp outlier) and/or altered cell composition. 
+
+- PL31 (amnion and chorion) have high contamination and altered cell composition profiles (more so for amnion)
+- PL18 (villi) has the highest maternal contamination (about 2x higher than any other villi sample), and a high "immune" component (hofbauer + nRBC)
+
+Some samples have either altered cell composition or high contamination but not both:
+
+- PL25 (amnion) and PL34 (amnion) have altered cell composition (more immune component) but low contamination
+- PL56 (chorion) and PL91 (chorion) have high contamination but their profiles appear normal, suggesting that contamination was due to other chorion samples. 
+
+All amnion and chorion samples mentioned here are chorioamnionitis samples, so these observations could be explained by that. The one villi sample highlighted here (PL18) is a control sample, so this could be due to sample processing or maternal infiltration / inflammation due to some other reason.
+
+Overall, there is some consistency in which samples have high contamination and also have altered cell composition. Using these two tools together can result in information that might be useful in interpreting methylation analysis later on, or deciding on what samples to keep or remove during quality control / data processing.
+
+
+```{r, fig.height = 7, fig.width = 8}
+p1 <- ss %>%
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Case_ID = gsub('_.*', '', Sample_Name)) %>%
+  
+  # make cases with matched tissues appear first
+  group_by(Case_ID) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  
+  # order case_id levels for plot
+  arrange(desc(n), Case_ID, Tissue, Trophoblasts) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name),
+         Case_ID = fct_inorder(Case_ID)) %>%
+  
+  # pivot longaer
+  select(Sample_Name,Case_ID, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  mutate(highlight = case_when(
+    Sample_Name %in% c('PL31_chc', 'PL31_amc', 'PL18_vc') ~ 'High cont +,\naltered cell comp.',
+    Sample_Name %in% c('PL25_chc', 'PL34_chc') ~ 'Altered cell comp.',
+    Sample_Name %in% c('PL56_amc', 'PL91_amc') ~ 'High cont.',
+    TRUE ~ NA_character_)) %>%
+  
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Case_ID, y = estimate, fill = component)) +
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey')+
+      geom_bar(data = . %>% 
+                 filter(!is.na(highlight)) %>%
+                 mutate(estimate = 1), 
+               stat = 'identity',
+               aes(x = Case_ID, y = estimate, color = highlight, linetype = highlight),
+               alpha = 0, show.legend = FALSE,
+               size = 1.25) +
+  scale_color_manual(values = rep('black', 3)) +
+  scale_linetype_manual(values = c('solid', 'longdash', 'dotted'))+
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  scale_x_discrete(breaks = c('PL31', 'PL25', 'PL34', 'PL18', 'PL56', 'PL91'))  +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+}
+
+p2 <- ss %>% 
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Case_ID = gsub('_.*', '', Sample_Name)) %>%
+  
+  # make cases with matched tissues appear first
+  group_by(Case_ID) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  
+  # order case_id levels for plot
+  arrange(desc(n), Case_ID, Tissue, Trophoblasts) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name),
+         Case_ID = fct_inorder(Case_ID)) %>%
+  
+  # highlight certain samples
+  mutate(highlight = case_when(
+    Sample_Name %in% c('PL31_chc', 'PL31_amc', 'PL18_vc') ~ 'High contamination+\naltered cell comp.',
+    Sample_Name %in% c('PL25_chc', 'PL34_chc') ~ 'Altered cell comp.',
+    Sample_Name %in% c('PL56_amc', 'PL91_amc') ~ 'High contamination',
+    TRUE ~ 'normal')) %>%
+  
+  ggplot() +
+  geom_bar(aes(x = Case_ID, y = prob_snp_outlier, fill = highlight),
+           stat = 'identity') +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.line = element_line(),
+        #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.text.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0)) +
+  scale_y_continuous(limits = c(0,0.25), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  scale_fill_manual(breaks = c( 'High contamination+\naltered cell comp.',
+                                  'Altered cell comp.',
+                                  'High contamination'),
+                      values = c('High contamination+\naltered cell comp.' = "#F8766D",
+                                 'Altered cell comp.' = "#00BA38",
+                                 'High contamination' = "#619CFF",
+                                 'normal' = 'darkgrey')) + 
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  scale_x_discrete(breaks = c('PL31', 'PL25', 'PL34', 'PL18', 'PL56', 'PL91'))  +
+  labs(y = 'Contamination', fill = '')
+
+p3 <- ss %>% 
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Case_ID = gsub('_.*', '', Sample_Name)) %>%
+  
+  # make cases with matched tissues appear first
+  group_by(Case_ID) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  
+  # order case_id levels for plot
+  arrange(desc(n), Case_ID, Tissue, Trophoblasts) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name),
+         Case_ID = fct_inorder(Case_ID)) %>%
+  
+  # highlight certain samples
+  mutate(highlight = case_when(
+    Sample_Name %in% c('PL31_chc', 'PL31_amc', 'PL18_vc') ~ 'highlight1',
+    Sample_Name %in% c('PL25_chc', 'PL34_chc') ~ 'highlight2',
+    Sample_Name %in% c('PL56_amc', 'PL91_amc') ~ 'highlight3',
+    TRUE ~ NA_character_)) %>%
+  
+   ggplot(aes(x = Case_ID, fill = Group)) +
+   geom_tile(aes(y = 'Group'), color = 'black') +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank()) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(breaks = c('PL31', 'PL25', 'PL34', 'PL18', 'PL56', 'PL91'))  +
+  scale_fill_brewer(palette = 'Set3') +
+  guides(fill = guide_legend(override.aes = list(colour = NA))) +
+  labs(x = 'Samples', y = '', fill = '')
+
+plot_grid(p1, p2, p3, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 1, 0.25))
+```
+
+Next we take a look at other villi datasets (below).
+
+Here we can see that there is clearly a batch effect that is associated with cell composition here. It is difficult to determine if this is due to differences in tissue processing leading to placental samples with different cell composition, or if this is due to a technical batch effect. However, given that technical variation within datasets is going to be lower, we can at least inspect outlying samples relative to other samples within the same dataset.
+
+```{r, fig.height = 8, fig.width = 8}
+p4 <- ss %>%
+  # subset to RSA
+  filter(!dataset_label_short %in% c('ACA', 'NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component)) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        plot.margin = unit(c(5.5,5.5,-2,5.5), 'pt')) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+  }
+
+p5 <- ss %>%
+  # subset to RSA
+  filter(!dataset_label_short %in% c('ACA', 'NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = prob_snp_outlier)) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() + 
+      scale_y_continuous(limits = c(0,0.22), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs( y = 'Contamination', fill = '')
+  }
+
+p6 <- ss %>%
+  # subset to RSA
+  filter(!dataset_label_short %in% c('ACA', 'NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name),
+         Group = fct_relevel(Group, c('in vivo', 'in vitro', 
+                                      'Control', 'IUGR', 'LOPET', 'EOPET'))) %>%
+  
+   ggplot(aes(x = Sample_Name, fill = Group)) +
+   geom_tile(aes(y = 'Group')) +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_blank(),
+        #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.text.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        legend.position = 'bottom',
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  guides(fill = guide_legend(ncol = 2)) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_fill_brewer(palette = 'Set3') +
+  guides(fill = guide_legend(override.aes = list(colour = NA))) +
+  labs(y = '', fill = '')
+
+plot_grid(p5, p4, p6,  ncol = 1, rel_heights = c(1, 1, 0.3), align = 'v', axis = 'lr')
+```
+
+It appears that the ART dataset has lots of samples that have a high immune component (nRBC and HB), and two samples with >10% contamination. Let's take a closer look.
+
+The two samples with high contamination, have a large immune component, but there are other samples with just as high immune component too. It's tough to say why these samples have high contamination, it could be due to maternal infiltrating immune cells or tissue processing reasons. The samples are healthy controls.
+
+```{r, fig.height = 5, fig.width = 8}
+p7 <- ss %>%
+  # subset to ART
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, highlight,
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component)) +
+      geom_bar(data = . %>% 
+                 filter(highlight == 'highlight') %>%
+                 mutate(estimate = 1),
+               stat = 'identity',
+               aes(x = Sample_Name, y = estimate),
+               size = 1.15,
+               alpha = 0,
+               color = 'black') +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        plot.margin = unit(c(5.5,5.5,-2,5.5), 'pt')) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+  }
+
+p8 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           aes(x = Sample_Name, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  theme_bw() + 
+      scale_y_continuous(limits = c(0,0.22), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+      scale_fill_discrete() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs( y = 'Contamination', fill = '')
+  }
+
+p9 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  
+  # get outlier in there  
+  pivot_longer(cols = c(Group, Outlier),
+               names_to = 'Group',
+               values_to = 'value') %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = value, y = Group)) +
+    geom_tile(aes(y = Group), color = 'white') +
+    geom_tile(data = . %>% 
+                   filter(highlight == 'highlight'),
+                 size = 1.15,
+                 alpha = 0,
+                 color = 'black') +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+    guides(fill = guide_legend(ncol = 2)) +
+    scale_y_discrete(expand = c(0,0)) +
+    scale_fill_brewer(palette = 'Set3') +
+    guides(fill = guide_legend(override.aes = list(colour = NA))) +
+    labs(y = '', fill = '')
+  }
+
+plot_grid(p8, p7, p9,  ncol = 1, rel_heights = c(1, 1, 0.4), align = 'v', axis = 'lr')
+```
