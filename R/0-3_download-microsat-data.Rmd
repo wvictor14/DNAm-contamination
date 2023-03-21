@@ -1,0 +1,150 @@
+---
+title: "0-3_download-microsat-samples"
+output: html_document
+date: "2022-08-12"
+editor_options: 
+  chunk_output_type: inline
+---
+
+About 12/43 samples were analyzed as part of the microsatellites experiments in order to address the problem that the original list of samples were all lowish contamination. These additional samples provide some observations in the upper contamination range.
+
+However, I need to do prepare a few things to analyze these samples:
+
+1. Download and compute contamination measures on these new samples
+
+I had not yet written concise functions that compute these contamination measures. So I will need to do this first, otherwise adding them to the pipeline would involve editing 3-5 scripts..
+
+This script is to first download and process the methylation data into this repository as an .rds file
+
+# Libraries
+
+```{r}
+library(minfi)
+library(tidyverse)
+library(here)
+library(readxl)
+library(ewastools)
+```
+
+## load in microsatellites data
+
+Let's read in the microsatellites sample sheet so that we know what DNAm samples to acquire
+
+```{r}
+ms <- read_xlsx(here::here('data', 'microsatellites', '2022-08-09 Contamination study result database_EA.xlsx'))
+ms_w <- ms # working copy of the data
+```
+
+## prepare for joining 
+
+will need to create case id and tissue columns. This info is in the sample id.
+
+```{r}
+ms_w <- ms_w %>%
+    mutate(case_id = str_extract(`SAMPLE ID`, '\\D+\\d+'),
+           Tissue = case_when(
+               grepl('v|r2', `SAMPLE ID`) ~ 'Villi',
+              # grepl('vm', `SAMPLE ID`) ~ 'Villi maternal',
+               grepl('dec', `SAMPLE ID`) ~ 'Decidua',
+               grepl('matwb', `SAMPLE ID`) ~ 'Maternal blood',
+               grepl('am', `SAMPLE ID`) ~ 'Amnion',
+               grepl('ch', `SAMPLE ID`) ~ 'Chorion'),
+           Tissue = ifelse(grepl('vm', `SAMPLE ID`), 'Villi maternal',
+                           Tissue))
+
+# ms_distinct is a list of samples removing multiple entries because of multiple microsatellite markers
+# will be easier to work with a more concise list
+(ms_distinct <- ms_w %>%
+    select(`SAMPLE ID`, case_id, Tissue) %>%
+    distinct() %>%
+    arrange(case_id, Tissue))
+
+# however there still remains more than one observation per case_id+tissue for some, because different villi combinations were sometimes tested (v1+v2 versus vc)
+# further reduce by eliminating sample id column completely
+
+(ms_distinct <- ms_distinct %>%
+        select(case_id, Tissue) %>%
+        distinct())
+```
+
+## load in DNAm data
+
+load in sample sheet
+
+mount Z drive
+
+```{r}
+(master_ss <- read_xlsx('Z:/ROBLAB6 InfiniumSequenom/Master_Sample_Sheet.xlsx'))
+```
+
+
+filter join with microsatellite data
+
+```{r}
+# return only matches between the two dataframes
+(joined <- ms_distinct %>%
+    inner_join(master_ss, by = c('case_id' = 'Case_ID', 'Tissue')))
+```
+
+```{r}
+#Inspect the samples that were not matched in ss
+(missing_in_ss <- ms_distinct %>%
+    anti_join(master_ss, by = c('case_id' = 'Case_ID', 'Tissue')))
+```
+
+Good so all samples that were not joined are maternal samples used primarily for the mircrosatellites experiment.
+
+Turn back attention to the joined dataframe
+
+```{r}
+# remove 27k samples
+joined <- joined %>%
+    filter(Platform != '27k')
+# 2 samples removed, 77 rows
+```
+
+```{r}
+# check duplicates
+joined %>% 
+    group_by(Basename) %>%
+    filter(n()>1)
+```
+
+Load DNAm data
+
+```{r, message = FALSE, warning = FALSE}
+# load idats with minfi
+#have to separate 450k/850k
+joined_450k <- joined %>% filter(Platform  == '450k')
+joined_850k <- joined %>% filter(Platform == '850k')
+rgset_450k <- read.metharray.exp(targets = joined_450k, extended = TRUE, force = TRUE)
+rgset_850k <- read.metharray.exp(targets = joined_850k, extended = TRUE, force = TRUE)
+```
+
+```{r}
+# combine 450k/850k
+rgset <- combineArrays(rgset_450k, rgset_850k)
+rgset
+```
+
+
+```{r}
+# load idats with ewastools
+et <- read_idats(joined$Basename)
+```
+
+basic preprocessing
+
+```{r}
+# get snp contamination, sex, and detection p values
+source('estimateContaminationSex.R')
+gs <- estimateContaminationSex(et, rgset)
+```
+
+```{r}
+#get controls
+controls <- map(control_metrics(et), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble 
+```
+
