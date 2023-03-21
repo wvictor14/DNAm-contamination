@@ -1,0 +1,722 @@
+---
+title: "1-0_analyze-contamination"
+author: "Victor Yuan"
+date: "19/06/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Load data
+
+```{r}
+library(tidyverse)
+library(here)
+library(viridis)
+library(readxl)
+library(broom)
+theme_set(theme_bw())
+
+ss_ACA <- readRDS(here::here('data', 'r objects', '0-1_ss-ACA.rds'))
+ss_GSE100197 <- read_csv('Z:/7_ExternalData/GSE100197/GSE100197_metadata.csv' )
+ss_GSE98224 <- read_csv('Z:/7_ExternalData/GSE98224/GSE98224_metadata.csv')
+ss_ntd <- readRDS(here::here('data', 'r objects', '0-1_ss-NTD.rds'))
+ss_GSE113600 <- read_csv('Z:/7_ExternalData/GSE113600/GSE113600_metadata.csv')
+ss_GSE120250 <- read_csv('Z:/7_ExternalData/GSE120250/GSE120250_metadata.csv')
+ss_reps_450k <- readRDS(here::here('data', 'r objects', '0-1_ss-reps-450k.rds'))
+ss_reps_850k <- readRDS(here::here('data', 'r objects', '0-1_ss-reps-850k.rds'))
+
+ss_GSE98938 <- read_csv('Z:/7_ExternalData/GSE98938/GSE98938_ss.csv')
+ss_GSE75248 <- read_csv('Z:/7_ExternalData/GSE75248/GSE75248_ss.csv')
+ss_GSE71678 <- read_csv('Z:/7_ExternalData/GSE71678/GSE71678_ss.csv')
+ss_GSE93208 <- read_csv('Z:/7_ExternalData/GSE93208/GSE93208_ss.csv')
+ss_GSE167885 <- read_csv('Z:/7_ExternalData/GSE167885/GSE167885_ss.csv')
+ss_GSE125605 <- read_csv('Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+ss_GSE75196 <- read_csv('Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+```
+
+# Combine sample sheets
+
+```{r}
+# ACA
+# get sex and group info
+ss_b7 <- read_xlsx(here::here('data', 'raw', 'Batch7des.xlsx'))
+ss_b7 <- ss_b7 %>% 
+  select(Sample, GA, Sex, Group) %>%
+  rename(Sample_Name = Sample)
+ 
+ss_ACA <- ss_ACA %>% 
+  select(Sample_Name, Tissue, contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC) %>%
+  left_join(ss_b7) %>%
+  mutate(dataset_label = 'Konwar 2018',
+         dataset_label_short = 'ACA',
+         GEO_accession = 'GSE115508')
+
+ss_GSE100197 <- ss_GSE100197 %>%
+  rename(Group = GSM_title) %>%
+  select(Sample_Name, Tissue, Group, Sex, GA, 
+         contains('prob'), contains('norm'), 
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC) %>%
+  mutate(GA = gsub('28w 4d', '28.5715',
+                   gsub('NO CONSENT', '',
+                   gsub('36w 5d', '36.7143',
+                        gsub('37w +', '37',
+                             gsub('32w 4d', '32.5715',
+                                  gsub('33w 4d', '33.5715',
+                                       gsub('32w 5d', '32.5715',
+                                            gsub('33w 5d', '33.5715',
+                                                 gsub('34w', '34',
+                                                      gsub('36w', '36',
+                                                           gsub('32w 6d', '32.8571',
+                                                                gsub('32w 3d', '32.4286',
+                                                                     gsub('25w', '25', 
+                                                                          gsub('37+', '37', GA))))))))))))))) %>%
+   mutate(GA = as.numeric(GA),
+          dataset_label = 'Wilson 2018',
+          dataset_label_short = 'PE1',
+          GEO_accession = 'GSE100197')
+
+
+ss_GSE98224 <- ss_GSE98224 %>% 
+  select(Sample_Name, GRP, Sex, GA, contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC) %>%
+  rename(Group = GRP) %>%
+  mutate(dataset_label = 'Leavey 2018',
+         dataset_label_short = 'PE2',
+         Tissue = 'Villi',
+         GEO_accession = 'GSE98224') 
+
+ss_ntd <- ss_ntd %>%
+  select(Sample_Name, Tissue, Condition, Sex, GA,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC) %>%
+  mutate(GA = gsub('22w 5d', '22.7143',
+                   gsub('18w 5d', '18.7143',
+                        gsub('18w 4d', '18.5714',
+                             gsub("13-14 or 16-17 wks?", '15',
+                                  GA)))) %>% as.numeric(),
+         dataset_label = 'Price 2016',
+         dataset_label_short = 'NTD',
+         GEO_accession = 'GSE69502'
+         ) %>%
+  rename(Group = Condition)
+  
+ss_GSE113600 <- ss_GSE113600 %>%
+  rename(Tissue = tissue, Group = group) %>%
+  select(Sample_Name, Tissue, Group, contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC) %>%
+  mutate(Sex = NA_character_, dataset_label = 'Yu 2018',
+         dataset_label_short = 'RSA',
+         GEO_accession  = 'GSE113600')
+
+ss_GSE120250 <- ss_GSE120250 %>%
+  dplyr::rename(Sex = sex) %>%
+  mutate(Tissue = 'Villi', Group = paste0(outlier_status, '-', art_treatment),
+         dataset_label = 'Choufani 2019',
+         dataset_label_short = 'ART',
+         GEO_accession  = 'GSE120250') %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         contains('prob'), contains('norm'), controls_failed, detp_05,
+         GEO_accession,
+         Trophoblasts:GA_epi_RRPC)
+
+ss <- bind_rows(ss_ACA, ss_GSE100197, ss_GSE98224, ss_ntd, ss_GSE113600,
+                ss_GSE120250) %>%
+  mutate(Sex = gsub('FEMALE', 'F',
+                    gsub('NO CONSENT', NA,
+                         gsub('unkn', NA,
+                              gsub('unknown?', NA, Sex)))),
+         Tissue = ifelse(Tissue == 'Villi?', "Villi", Tissue),
+         Tissue_gen = ifelse(Tissue %in% c('Villi', 'Amnion', 'Chorion'),
+                             'Placenta', 
+                             ifelse(Tissue =='decidua', 'Decidua', 'Fetal somatic')),
+         Tissue_gen2 = ifelse(Tissue %in% c('Villi', 'Amnion', 'Chorion'),
+                             paste0('Placenta (', Tissue, ')'), 
+                             ifelse(Tissue =='decidua', 'Decidua', 'Fetal somatic')))
+
+
+ss_GSE98938 <- ss_GSE98938 %>%
+  mutate(Tissue = gsub('Chorionic villi', 'Villi', Tissue),
+         Group = 'Control',
+         Sex = NA,
+         dataset_label = 'Zhang 2021',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE98938',
+         Tissue_gen = ifelse(Tissue %in% c('Villi', 'Amnion', 'Chorion',
+                                           'Cytotrophoblast'),
+                             'Placenta', Tissue),
+         Tissue_gen2 = case_when(
+           Tissue == 'Villi' ~ 'Placenta (Villi)',
+           Tissue == 'Amnion' ~ 'Placenta (Amnion)',
+           Tissue == 'Chorion' ~ 'Placenta (Chorion)',
+           Tissue == 'Cytotrophoblast' ~ 'Placenta (Cytotrophoblast)',
+           Tissue == 'Basal plate' ~ 'Basal plate'
+         ),
+         GA = NA) %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA, GA_cat,
+         Tissue_gen, Tissue_gen2)
+
+ss_GSE75248 <- ss_GSE75248 %>%
+  mutate(Tissue = 'Villi',
+         Sex = gsub('Female', 'F',
+                    gsub('Male', 'M', Sex)),
+         Group = 'Control',
+         dataset_label = 'Paquette 2016',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE75248',
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Villi)') %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA,
+         Tissue_gen, Tissue_gen2)
+ss_GSE71678 <- ss_GSE71678 %>%
+  mutate(Tissue = 'Villi',
+         dataset_label = 'Green 2016',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE71678',
+         Group = Condition,
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Villi)') %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         controls_failed, detp_05,
+         contains('prob'), contains('norm'),
+         Trophoblasts:GA_epi_RRPC, GA,
+         Tissue_gen, Tissue_gen2)
+
+ss_GSE93208 <- ss_GSE93208 %>%
+  dplyr::rename(GA_cat = GA) %>%
+  mutate(Tissue = 'Cytotrophoblast',
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Cytotrophoblast)',
+         Sex = NA,
+         dataset_label = 'Nordor 2017',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE93208',
+         GA = NA,
+         Group = 'Control') %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA, GA_cat,
+         Tissue_gen, Tissue_gen2)
+  
+ss_GSE167885 <- ss_GSE167885 %>%
+   mutate(Tissue = 'Villi',
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Villi)',
+         dataset_label = 'ELGAN',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE167885',
+         GA = NA,
+         Group = 'Preterm') %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA,
+         Tissue_gen, Tissue_gen2)
+ss_GSE125605 <- ss_GSE125605 %>%
+   mutate(Tissue = 'Villi',
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Villi)',
+         dataset_label = 'Wang 2019',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE125605',
+         GA = as.numeric(str_extract(GA, ".*(?=\\+)")) + 
+           as.numeric(str_extract(GA, "(?<=\\+).*"))/7,
+         Group = Pathology,
+         Sex = NA) %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA,
+         Tissue_gen, Tissue_gen2) 
+ss_GSE75196 <- ss_GSE75196 %>%
+   mutate(Tissue = 'Villi',
+         Tissue_gen = 'Placenta',
+         Tissue_gen2 = 'Placenta (Villi)',
+         dataset_label = 'Yeung 2016',
+         dataset_label_short = NA,
+         GEO_accession = 'GSE75196',
+         Group = Pathology,
+         Sex = ifelse(Fetal_Sex == 'Male', 'M', 'F')) %>%
+  select(Sample_Name, Tissue, Group, Sex, dataset_label, dataset_label_short,
+         GEO_accession,
+         contains('prob'), contains('norm'),
+         controls_failed, detp_05,
+         Trophoblasts:GA_epi_RRPC, GA,
+         Tissue_gen, Tissue_gen2)
+ss <- bind_rows(ss, ss_GSE98938, ss_GSE75248, ss_GSE71678, 
+          ss_GSE93208, ss_GSE167885, ss_GSE125605, ss_GSE75196)
+```
+
+Tissue 
+  Villi, Amnion, Chorion, Spinal Cord, Kidney, Brain, Muscle, decidua,         
+  Cytotrophoblast, Basal Plate
+GA - numeric
+GA_cat - "Term"        "Second"      "12-14 weeks" "8-10 weeks"
+Sex - F, M,
+Group - GEO, pathology
+dataset_label - Acute chorioamnionitis, preeclampsia 1, 2, neural tube defects
+dataset_label_short - "ACA" "PE1" "PE2" "NTD" "RSA" "ART"
+Tissue_gen - Placenta, fetal somatic, decidua
+Tissue_gen2 - Placenta (Villi), Placenta (Amnion), Placenta (Chorion), Fetal somatic, Decidua  
+
+# Fix group labels
+
+```{r}
+ss <- ss %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, prob_snp_outlier)) %>%
+  
+  # ART, outliers and art status
+  mutate(Outlier = ifelse(grepl('Y-', Group) & dataset_label_short == 'ART', 'Outlier', 'Not outlier')) %>%
+  mutate(Group = ifelse(dataset_label_short == 'ART',
+                        ifelse(grepl('in vitro', Group), 'in vitro', 
+                               ifelse(grepl('in vivo', Group), 'in vivo', 
+                                      ifelse(grepl('NA', Group), 'Control', Group))),
+                        Group))  %>%
+  
+  # ACA
+  mutate(Group = ifelse(dataset_label_short == 'ACA', case_when(
+           Group == 'control' ~ 'Control',
+           Group == 'chorioamnionitis' ~ 'Chorioamnionitis'), Group)) %>%
+  
+  # NTD
+  mutate(Group = ifelse(dataset_label_short == 'NTD', case_when(
+           Group == 'ANEN' ~ 'Anencephaly',
+           Group == 'conrol' ~ 'Control',
+           Group == 'control' ~ 'Control',
+           Group == 'SB' ~ 'Spina Bifida',
+           Group == 'unkn' ~ NA_character_), Group)) %>%
+  
+  # PE
+  mutate(Group = ifelse(dataset_label_short %in% c('PE1'),
+                        case_when(
+                          grepl('EOPE', Group) ~ 'EOPET',
+                          grepl('LOPE', Group) ~ 'LOPET',
+                          grepl('control', Group, ignore.case = TRUE) ~ 'Control',
+                          grepl('IUGR', Group) ~ 'IUGR',
+                          grepl('PM139r1', Group) ~ 'IUGR'
+                        ), Group))%>% 
+  
+  # PE2    
+  mutate(Group = ifelse(dataset_label_short %in% c('PE2'),
+                        case_when(
+                          Group %in% c('EOPE') ~ 'EOPET',
+                          Group %in% c('LOPE') ~ 'LOPET',
+                          Group %in% c('PreT', 'Term') ~ 'Control'),
+                        Group))
+
+ss <- ss %>%
+  filter(GEO_accession %in% c("GSE115508", "GSE100197","GSE98224","GSE69502",
+                              "GSE120250", "GSE98938","GSE75248","GSE71678",
+                              "GSE167885","GSE125605","GSE75196", 
+                              "GSE113600")) %>%
+  mutate(GEO_accession = fct_relevel(GEO_accession,
+                                     c("GSE115508", "GSE100197","GSE98224",
+                                       "GSE69502",
+                              "GSE120250", "GSE98938","GSE75248","GSE71678",
+                              "GSE167885","GSE125605","GSE75196", 
+                              "GSE113600")),
+    dataset = as_factor(as.numeric(as_factor(GEO_accession)))) 
+ss %>% 
+  select(dataset, GEO_accession, dataset_label) %>%
+  distinct() %>%
+  arrange(dataset) %>%
+  write_csv(here::here('data', 'raw', '1-0_dataset-key.csv'))
+```
+
+# Sex
+
+```{r}
+ss %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, 
+             color = Sex)) +
+  geom_point() +
+  theme(panel.grid.minor = element_blank(),
+        #panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  facet_wrap(~ dataset) +
+  scale_x_continuous(breaks = c(0.7, 0.9, 1.1)) +
+  labs(color = 'Reported Sex', x = 'Intensity from X', y ='Intensity from Y')
+
+ss %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, 
+             color =  dataset)) +
+  geom_point()  +theme(panel.grid.minor = element_blank(),
+        #panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  labs(color = '', x = 'Intensity from X', y ='Intensity from Y')
+
+ss %>%
+  filter(dataset_label_short == 'ART',
+         Sex == 'F',
+         normalized_x_intensity < 0.92)
+```
+
+Label those samples with questionable sex chromosome intensities
+
+```{r}
+ss <- ss %>%
+  mutate(Flag_XY = case_when(
+    GEO_accession == 'GSE113600' &
+      normalized_x_intensity < 0.95 ~ 'Flagged',
+    
+    GEO_accession == 'GSE115508' &
+      Sex == 'M' &
+      normalized_x_intensity > 0.8 ~ 'Flagged',
+    
+    GEO_accession == 'GSE120250' &
+      normalized_x_intensity > 0.85 &
+      normalized_x_intensity < 0.9 ~ 'Flagged',
+    
+    GEO_accession == 'GSE71678' &
+      ((Sex == 'M' & normalized_x_intensity > 0.9) |
+      (Sex == 'F' & normalized_x_intensity < 0.9)) ~ 'Flagged',
+    
+    GEO_accession == 'GSE75248' &
+      (normalized_y_intensity < 0.75 & 
+         normalized_y_intensity > 0.30) |
+      (normalized_x_intensity > 0.83 & 
+      Sex == 'M') ~ 'Flagged',
+    
+    GEO_accession == 'GSE98938' &
+      (normalized_x_intensity > 0.83 & 
+         normalized_y_intensity > 0.5) ~ 'Flagged',
+  )) 
+
+# only males can show evidence of contam with XY plots
+ss <- ss %>%
+  mutate(Flag_XY_contam = case_when(
+    GEO_accession == 'GSE167885' &
+      normalized_x_intensity > 0.77 &
+      normalized_y_intensity > 0.75 ~ "Flagged",
+    
+    GEO_accession == 'GSE113600' &
+      normalized_x_intensity > 0.75 &
+      normalized_x_intensity < 0.92 ~ 'Flagged',
+    
+    GEO_accession == 'GSE115508' &
+      Sex == 'M' &
+      normalized_x_intensity > 0.8 ~ 'Flagged',
+    
+    GEO_accession == 'GSE120250' &
+      Sex == 'M' &
+      normalized_x_intensity > 0.85 &
+      normalized_x_intensity < 0.9 ~ 'Flagged',
+    
+    GEO_accession == 'GSE71678' &
+      Sex == 'M' & 
+      normalized_x_intensity > 0.9 ~ 'Flagged',
+    
+    GEO_accession == 'GSE75248' &
+      Sex == 'M' &
+      (normalized_y_intensity < 0.75 & 
+         normalized_y_intensity > 0.30) |
+      (normalized_x_intensity > 0.83 & 
+      Sex == 'M') ~ 'Flagged',
+    
+    GEO_accession == 'GSE98938' &
+      (normalized_x_intensity > 0.83 & 
+         normalized_y_intensity > 0.5) ~ 'Flagged',
+  ))
+
+(a <- ss %>%
+   filter(GEO_accession != "GSE113600") %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, 
+             color = Flag_XY_contam)) +
+  geom_point(size = 0.7) +
+  theme(panel.grid.minor = element_blank(),
+        #panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        strip.background = element_blank(),#element_rect(color = 'black', fill = NA),
+        strip.placement = 'inside') +
+  facet_wrap(~dataset, nrow = 2) +
+  scale_x_continuous(breaks = c(0.8, 1)) +
+  scale_color_discrete(breaks = 'Flagged', 
+                       guide = 'none') +
+  labs(color = '', 
+       x = 'X normalized intensity', y ='Y\nnormalized\nintensity')) # 3.5, 6.25
+
+ss %>%
+  group_by(dataset, GEO_accession, dataset_label) %>%
+  summarize(n = n(),
+            `XY outliers` = sum(Flag_XY == 'Flagged', na.rm = TRUE),
+            `XY male outliers` = sum(Flag_XY_contam=='Flagged',na.rm=TRUE)) %>%
+  write_csv(here::here('data', 'raw', '1-0_dataset-key-flagxy.csv'))
+  
+```
+
+## Samples that failed controls
+
+```{r}
+ss %>%
+  group_by(dataset) %>%
+  summarize(n = n(),
+            `n failed` =sum(controls_failed)) %>%
+  write_csv(here::here('data', 'raw', '1-0_dataset-failed-controls.csv'))
+
+(a <- ss %>%
+  ggplot(aes(x = normalized_x_intensity, y = normalized_y_intensity, 
+             color = controls_failed)) +
+  geom_point(alpha = 0.5, size = 1) +
+  theme(panel.grid.minor = element_blank(),
+        #panel.border = element_blank(),
+        axis.line.y = element_line(color = 'black'),
+        panel.spacing.x = unit(0, "lines"),
+        axis.line = element_line(),
+        #strip.background = element_rect(color = 'black', fill = NA),
+        strip.background = element_blank(),
+        strip.placement = 'inside') +
+  facet_wrap(~dataset, ncol = 5) +
+  scale_x_continuous(breaks = c(0.7, 0.9, 1.1)) +
+  scale_color_manual(values = c('FALSE' = 'grey', 'TRUE' = 'red'),
+                     labels = c('Passed', 'Failed')) +
+  labs(color = '', x = 'Intensity from X', y ='Intensity from Y'))
+#h:4 w:7
+```
+
+# Genotype
+
+```{r}
+
+(a<-ss %>% 
+   filter(GEO_accession != "GSE113600") %>%
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, 
+             fill = psnp_cut)) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(~dataset, scales = 'free', space= 'free', switch = 'x')  +
+  scale_fill_viridis_d(option = 'H', direction = -1) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')) # 2.5, 6.25
+
+a <- ss%>% 
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  group_by(dataset, GEO_accession, dataset_label) %>%
+  count(psnp_cut) %>%
+  pivot_wider(id_cols = -c(psnp_cut, n),
+              names_from = psnp_cut,
+              values_from = n) 
+
+# Distribution across p(snp) + columns for XY 
+ss %>%
+  group_by(dataset, GEO_accession, dataset_label) %>%
+  summarize(n = n(),
+            `XY outliers` = sum(Flag_XY == 'Flagged', na.rm = TRUE),
+            `XY outliers males` = sum(Flag_XY_contam == 'Flagged', 
+                                      na.rm = TRUE)) %>%
+  mutate(`XY outliers males` = ifelse(`XY outliers males`==0, NA, 
+                                      `XY outliers males`),
+         `XY outliers` = ifelse(`XY outliers`==0, NA, 
+                                      `XY outliers`)) %>%
+  left_join(a) %>%
+  write_csv(na = '',
+    here::here('data', 'raw', '1-0_dataset-key-flagxy-psnp.csv'))
+```
+
+
+## where do the flagged samples fall in these p(outlier) spectrum?
+
+
+```{r}
+(p <- ss %>% 
+   filter(GEO_accession != "GSE113600") %>%
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, 
+             fill = Flag_XY_contam)) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(~dataset, scales = 'free', space= 'free', switch = 'x')  +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+   scale_fill_discrete(breaks = c('Flagged'),
+                       labels = 'XY Flagged') +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')) 
+  
+ggsave(here::here("data", "raw", "1-0_genotype-flagxy.jpeg"),p, 
+       width=9, height=3, units="in") #h: 2, w: 6.5
+
+## sex boxplot
+(a<-ss %>% 
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  ggplot(aes(x = Flag_XY_contam, y = prob_snp_outlier, 
+             fill = Flag_XY_contam)) +
+  geom_boxplot(outlier.size = 0.6) +
+  #geom_jitter(alpha = 0.5) +
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5), 
+                     labels = function(x)scales::percent(x, accuracy = 1)) +
+  scale_x_discrete(labels = c('XY flagged', 'Normal'))+
+   scale_fill_discrete(breaks = c('Flagged'),
+                       labels = '',
+                       guide = "none") +
+  labs(fill ='', x= '', y = 'P(outlier)') +
+  coord_flip())
+
+t.test(prob_snp_outlier ~ Flag_XY_contam, 
+       data = ss %>% mutate(Flag_XY_contam = fct_explicit_na(Flag_XY_contam)))
+
+b <- ss %>%
+  filter(Flag_XY_contam == 'Flagged') %>%
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  group_by(dataset, GEO_accession, dataset_label) %>%
+  count(psnp_cut) %>%
+  pivot_wider(id_cols = -c(psnp_cut, n),
+              names_from = psnp_cut,
+              values_from = n) %>%
+  select(dataset:`(0,0.1]`, `(0.1,0.2]`, `(0.2,0.3]`, `(0.3,0.4]`) 
+ss %>% 
+  count(dataset,GEO_accession, dataset_label) %>%
+  left_join(b) %>%
+  write_csv(na = '',
+    here::here('data', 'raw', '1-0_dataset-key-flagxy-AND-psnp.csv'))
+  
+  
+```
+
+## samples that failed controls
+
+```{r}
+ss %>% 
+  mutate(psnp_cut = cut(prob_snp_outlier, 
+                        breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5))) %>%
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, 
+             fill = psnp_cut)) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(controls_failed~dataset, 
+             scales = 'free', space= 'free', switch = 'x')  +
+  scale_fill_viridis_d(option = 'H', direction = -1) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')
+
+(a <- ss %>% 
+   filter(GEO_accession != "GSE113600") %>%
+  ggplot(aes(x = Sample_Name, y = prob_snp_outlier, 
+             fill = controls_failed)) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  facet_grid(cols = vars(dataset), 
+             scales = 'free', space= 'free', switch = 'x')  +
+  scale_fill_manual(values = c('FALSE' = 'grey', 'TRUE' = 'red'),
+                     labels = c('Passed', 'Failed')) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')) # 2.5, 6.25
+
+(a<-ss %>%
+   filter(GEO_accession != "GSE113600") %>%
+  ggplot(aes(x = controls_failed, y = prob_snp_outlier, fill = controls_failed)) +
+  geom_boxplot(lwd = 0.25, outlier.size = 0.5) +
+  theme(axis.text.x = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = NA),
+        axis.line = element_line(),
+        #panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA),
+        strip.placement = 'outside') +
+  facet_grid(cols = vars(dataset), 
+             scales = 'free', space= 'free', switch = 'x')  +
+  scale_fill_manual(values = c('FALSE' = 'grey', 'TRUE' = 'red'),
+                     labels = c('Passed', 'Failed')) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 0.5)) +
+  labs(fill ='', x= 'Datasets, samples', y = 'P(outlier)')) # 2.5, 6.25
+  
+```
+
+# Table of variance and number of outliers
+
+```{r}
+(ss %>%
+  filter(Tissue == 'Villi') %>%
+  group_by(dataset) %>%
+  summarize(mean = mean(prob_snp_outlier),
+            median = median(prob_snp_outlier),
+            var = var(prob_snp_outlier),
+            n_015 = sum(prob_snp_outlier > 0.15)) %>%
+  write_csv(here::here('Results', '1-0_variance-noutliers.csv')))
+
+```
+
+# Save
+
+```{r eval = FALSE}
+ss %>% saveRDS(here::here('data', 'r objects', '1-0_ss.rds'))
+```
+
+
