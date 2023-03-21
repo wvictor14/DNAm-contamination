@@ -1,0 +1,2006 @@
+---
+title: "1-1_cell-composition"
+author: "Victor Yuan"
+date: "27/07/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+For analysis of cell composition and epigenetic age.
+
+For generating cell composition and epigenetic age estimates see `0-1_normalization`
+
+# libraries and data
+
+```{r, message = FALSE, warning = FALSE}
+library(minfi)
+library(wateRmelon)
+library(here)
+library(planet)
+library(EpiDISH)
+library(patchwork)
+library(egg)
+library(cowplot)
+library(broom)
+library(tidyverse)
+
+ss <- readRDS(here::here('data', 'r objects', '1-0_ss.rds'))
+
+# color key
+color_code <- readRDS(here::here('data', 'r objects', 'color_code.rds'))
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+
+ss <- ss %>% 
+  mutate(Group = ifelse(Sample_Name %in% c('PL148_vc', 'PL149_vc'), 
+                         'Control', Group))
+
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+## ACA
+
+```{r}
+p1 <- ss %>%
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Case_ID = gsub('_.*', '', Sample_Name)) %>%
+  
+  # make cases with matched tissues appear first
+  group_by(Case_ID) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  
+  # order case_id levels for plot
+  arrange(desc(n), Case_ID, Tissue, Trophoblasts) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name)),
+         Case_ID = fct_inorder(Case_ID)) %>%
+  
+  # pivot longaer
+  select(Sample_Name,Case_ID, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  mutate(highlight = ifelse(Sample_Name %in% c('PL31_chc',  'PL25_chc', 'PL31_amc', 'PL18_vc'),
+                            'highlight', NA_character_)) %>%
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Case_ID, y = estimate, fill = component),
+           width = 1) +
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey')+
+      geom_bar(data = . %>% 
+                 filter(!is.na(highlight)) %>%
+                 mutate(estimate = 1), 
+               stat = 'identity',
+               aes(x = Case_ID, y = estimate, color = highlight),
+               alpha = 0, show.legend = FALSE,
+               size = 0.5,
+               width = 1) +
+  scale_color_manual(values = 'black') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  scale_x_discrete(breaks = c('PL31', 'PL25', 'PL18')) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = '', fill = '')
+    };p1
+
+p2 <- ss %>% 
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Case_ID = gsub('_.*', '', Sample_Name)) %>%
+  
+  # make cases with matched tissues appear first
+  group_by(Case_ID) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  
+  # order case_id levels for plot
+  arrange(desc(n), Case_ID, Tissue, Trophoblasts) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name)),
+         Case_ID = fct_inorder(Case_ID)) %>%
+  
+  # highlight certain samples
+  mutate(highlight = ifelse(Sample_Name %in% c('PL31_chc',  'PL25_chc', 'PL31_amc', 'PL18_vc'),
+                            'highlight', NA_character_)) %>%
+  
+  ggplot() +
+  geom_bar(aes(x = Case_ID, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE,
+           stat = 'identity') +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line = element_line(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0)) +
+  scale_y_continuous(limits = c(0,0.25), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  scale_x_discrete(breaks = c('PL31', 'PL25', 'PL18'))  +
+  labs(x = 'Samples', y = '');p2
+  
+plot_grid(p1, p2, ncol = 1, align = 'v', axis = 'lr')
+
+```
+
+### just villi
+
+```{r}
+p1a <- ss %>%
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  mutate(highlight = ifelse(Sample_Name %in% c('PL18_vc'),
+                            'highlight', NA_character_)) %>%
+  filter(Tissue == 'Villi') %>%
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component),
+           width = 1) +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey')+
+      geom_bar(data = . %>% 
+                 filter(!is.na(highlight)) %>%
+                 mutate(estimate = 1), 
+               stat = 'identity',
+               aes(x = Sample_Name, y = estimate, color = highlight),
+               alpha = 0, show.legend = FALSE,
+               size = 0.5,
+               width = 1) +
+  scale_color_manual(values = 'black') +
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  #scale_x_discrete(breaks = c('PL18_vc')) +
+  theme(#axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+    };p1a
+
+p2 <- ss %>% 
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  # highlight certain samples
+  mutate(highlight = ifelse(prob_snp_outlier > 0.12,
+                            'highlight',
+                            NA_character_)) %>%
+  filter(Tissue == 'Villi') %>%
+  
+  ggplot() +
+  geom_bar(aes(x = Sample_Name, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE, width = 1,
+           stat = 'identity') +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line = element_line(),
+        #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.text.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0)) +
+  scale_y_continuous(limits = c(0,0.25), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  facet_grid(rows = vars(Tissue), switch ='y') +
+  #scale_x_discrete(breaks = c('PL18_vc'))  +
+  labs(x = '', y = 'P(outlier)');p2
+
+p2b <- ss %>% 
+  # subset to ACA
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name)) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  # get outlier in there  
+  pivot_longer(cols = c(Group),
+               names_to = 'Group',
+               values_to = 'value') %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.12, 'highlight', NA_character_)) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = value, y = Group)) +
+    geom_tile(aes(y = Group), color = NA) +
+    geom_tile(data = . %>% 
+                   filter(highlight == 'highlight'),
+                 size = 0.5,
+                 alpha = 0,
+                 color = 'black') +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          #axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+    guides(fill = guide_legend(ncol = 2)) +
+    scale_y_discrete(expand = c(0,0)) +
+    scale_x_discrete(breaks = c('PL18_vc')) +
+    scale_fill_brewer(palette = 'Set3') +
+    guides(fill = guide_legend(override.aes = list(colour = NA))) +
+    labs(y = '', fill = '', x = 'Samples')
+  };p2b
+
+plot_grid(p2, p1a, p2b, ncol = 1, align = 'v', axis = 'lr', 
+          rel_heights = c(1, 1, 0.65))
+
+
+ss %>% filter(Sample_Name == 'PL18_vc') %>% as.data.frame()
+
+ss %>% 
+  filter(dataset_label_short %in% c('ACA'),
+         
+         # remove replicates
+         !grepl('_rvc', Sample_Name),
+         Tissue == 'Villi') %>%
+  
+  summarize(across(Trophoblasts:Syncytiotrophoblast, mean))
+```
+
+# Create GA_cat_combined and GA_cat_epi
+
+```{r}
+ss <- ss %>%
+  mutate(
+    # use reported when possible
+    GA_cat_combined = case_when(
+    !is.na(GA) ~ as.character(
+      cut(GA, c(0,14, 27, 37, 100),
+          labels = c('First', 'Second', 'Third', 'Term'))),
+    is.na(GA) & !is.na(GA_cat) ~ GA_cat,
+    
+    is.na(GA) & is.na(GA_cat) ~ 
+      as.character(
+        cut(GA_epi_RPC, c(0,14, 27, 37, 100),
+            labels = c('First', 'Second', 'Third', 'Term')))),
+    
+    GA_cat_epi = cut(GA_epi_RPC, c(0,14, 27, 37, 100),
+                     labels = c('First', 'Second', 'Third', 'Term')))  %>%
+  # order for plot
+  arrange(dataset, GA_cat_epi, Outlier, Group, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) 
+  
+```
+
+
+## all
+
+```{r}
+ss_wide <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset, Outlier, Group, Syncytiotrophoblast) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), contains('GA'), dataset,
+         dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, 
+                                 rev(c('Syncytiotrophoblast', 'Trophoblasts',
+                                       'Stromal', 'Endothelial', 'Hofbauer', 
+                                       'nRBC')))) 
+
+ss_wide %>%
+  filter(GA_cat_epi %in% c('Term', 'Third')) %>%
+  ggplot(aes(x = dataset, y = estimate, color = component)) +
+  geom_boxplot() +
+  #geom_jitter(alpha = 0.75) +
+  facet_grid(component~., scale = 'free') +
+  scale_color_manual(values = 
+                      color_code_tissue[c('Syncytiotrophoblast', 
+                                          'Trophoblasts', 'Stromal',
+                                          'Endothelial', 'Hofbauer', 
+                                          'nRBC')],
+                     guide = guide_legend(reverse = TRUE, nrow = 1)) +
+  scale_y_continuous(#limits = c(-0.1,1.25), breaks = c(0, 0.5, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.text.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = 'bottom') +
+  labs(x = '', color = '')
+  
+ss_wide %>%
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           width = 1, 
+           aes(x = Sample_Name, y = estimate, fill = component)) +
+  facet_grid(cols = vars(dataset), 
+             rows = vars(component),
+             scale = 'free', space = 'free',
+             switch = 'x',
+             labeller = labeller(component = c(
+               nRBC = 'nRBC',
+               Hofbauer = 'Hofb',
+               Endothelial = 'Endo',
+               Stromal = 'Stro',
+               Trophoblasts = 'Trop',
+               Syncytiotrophoblast = 'Sync'
+             ))) +
+  scale_fill_manual(values = color_code_tissue[levels(.$component)], 
+                    na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.25), breaks = c(0, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = 0, hjust = 0),
+        strip.placement = 'outside',
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = '') +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = '', fill = '')
+    }
+
+
+```
+
+alternative visualizations:
+
+```{r}
+
+
+p3b <- ss %>%
+  filter(Tissue == 'Villi', GA_epi_RPC > 26) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(GA_epi_RPC) %>% 
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, 
+                                 rev(c('Syncytiotrophoblast', 'Trophoblasts',
+                                       'Stromal', 'Endothelial', 'Hofbauer', 
+                                       'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', width = 1,
+           aes(x = Sample_Name, y = estimate, fill = component)) +
+  facet_grid(cols = vars(dataset),
+             scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue[levels(.$component)], 
+                    na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.25), breaks = c(0, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+    };p3b
+
+p4 <- ss %>%
+
+  filter(Tissue == 'Villi', GA_epi_RPC > 26) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(GA_epi_RPC) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', width = 1,
+           aes(x = Sample_Name, y = prob_snp_outlier)) +
+  facet_grid(cols = vars(dataset), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue[levels(.$component)], 
+                    na.value = 'grey') +
+  theme_bw() + 
+      scale_y_continuous(limits = c(0,0.24), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(x = '', y = 'p(outlier)', fill = '')
+    };p4
+
+
+p9 <- ss %>%
+  # subset to 
+  filter(Tissue == 'Villi', GA_epi_RPC > 26) %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi'),
+         
+         # make non outlier datasets NA
+         Outlier = ifelse(dataset_label_short != 'ART',
+                          NA_character_,
+                          Outlier)) %>%
+  
+  
+  # order for plot
+  arrange(GA_epi_RPC) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # get outlier in there  
+  pivot_longer(cols = c(Group, Outlier),
+               names_to = 'Group',
+               values_to = 'value') %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_),
+         # relevel for order
+         value = fct_relevel(value,
+                             'Control', 'Chorioamnionitis', 'in vitro', 'in vivo', 
+                               'Not outlier', 'Outlier', 'Anencephaly', 'Spina Bifida',
+                               'EOPET', 'LOPET', 'IUGR')) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = value, y = Group)) +
+    geom_tile(aes(y = Group)) +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          #axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          axis.line = element_line(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.major.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset), scale = 'free', space = 'free') +
+    scale_y_discrete(expand = c(0,0), labels = c('Outlier' = 'Outlier\nstatus',
+                                                 'Group' = 'Group')) +
+    scale_fill_brewer(palette = 'Set3', na.translate = FALSE) +
+    guides(fill = guide_legend(override.aes = list(colour = NA),
+                               ncol = 3)) +
+    labs(y = '', fill = '')
+  }
+
+#plot_grid(p4, p3,p9, rel_heights = c(0.4, 1,0.5),
+#          ncol = 1, align = 'v', axis = 'lr') # 7, 7
+
+plot_grid(p4, p3b, rel_heights = c(0.6, 0.8),
+          ncol = 1, align = 'v', axis = 'lr') #H:5.5, W: 6.5
+
+ss %>%
+  # subset to 
+  filter(Tissue == 'Villi') %>%
+  group_by(dataset) %>%
+  summarize(sd = sd(prob_snp_outlier))
+
+
+```
+
+just cell comp
+
+```{r}
+# defining the breaks function, 
+# s is the scaling factor (cf. multiplicative expand)
+equal_breaks <- function(n = 3, s = 0.05, ...){
+  function(x){
+    # rescaling
+    d <- s * diff(range(x)) / (1+2*s)
+    round(seq(min(x)+d, max(x)-d, length=n), 1)
+  }
+}
+
+
+p3c <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           width = 1, 
+           aes(x = Sample_Name, y = estimate, fill = component)) +
+  facet_grid(cols = vars(dataset_label_short), 
+             rows = vars(component),
+             scale = 'free', space = 'free',
+             switch = 'y',
+             labeller = labeller(component = c(
+               nRBC = 'nRBC',
+               Hofbauer = 'Hofb',
+               Endothelial = 'Endo',
+               Stromal = 'Stro',
+               Trophoblasts = 'Trop',
+               Syncytiotrophoblast = 'Sync'
+             ))) +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        #strip.text.x = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = '') +
+  labs(x = '', y = '', fill = '')
+    };p3c
+
+
+## boxplots
+p3d <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+    ggplot(data = ., aes(x = dataset_label_short, y = estimate,
+                         fill = component)) +
+      geom_violin() +
+      geom_boxplot(fill = 'white', width = 0.1) +
+      #geom_jitter(alpha = 0.5) + 
+      facet_grid(rows = vars(component), 
+                 scales = 'free',
+                 switch = 'y') +
+      scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+      theme_bw() +
+      scale_y_continuous(breaks = scales::extended_breaks(n = 3),
+                         labels = scales::percent) +
+      theme(#panel.border = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_line(),
+            strip.background = element_blank(),
+            strip.placement = 'outside',
+            strip.text.y.left = element_text(angle = 0),
+            panel.grid.major.x = element_blank(),
+            panel.grid.minor.x = element_blank(),
+            #panel.grid.major.y = element_blank(),
+            panel.grid.minor.y = element_blank(),
+            legend.position = '') +
+      labs(x = '', y = '', fill = '')
+  };p3d
+
+## boxplots
+p3e <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, GEO_accession, Outlier, 
+         Trophoblasts:Syncytiotrophoblast,GA_cat_epi) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  filter(GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>%
+  
+  # highlight certain samples
+  {
+    ggplot(data = ., aes(x = component, y = estimate,
+                         color = dataset)) +
+      geom_boxplot(fill = '#F8F8F8') +
+      #geom_jitter(alpha = 0.5) + 
+      theme_bw() +
+      scale_y_continuous(breaks = scales::extended_breaks(n = 5),
+                         labels = scales::percent) +
+      scale_color_manual(values = colors[unique(.$dataset)])+
+      theme(panel.border = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_line(),
+            strip.background = element_blank(),
+            strip.placement = 'outside',
+            strip.text.y.left = element_text(angle = 0),
+            panel.grid.major.x = element_blank(),
+            panel.grid.minor.x = element_blank(),
+            panel.grid.major.y = element_line(color = '#A9A9A9'),
+            #panel.grid.major.y = element_blank(),
+            panel.grid.minor.y = element_blank(),
+            panel.background  = element_rect(fill = "#E8E8E8"),
+            legend.position = 'right') +
+      labs(x = '', y = '', color = '', fill = '') +
+      facet_grid(rows = vars(GA_cat_epi ), switch = 'y')
+  };p3e
+```
+
+Save table of means by dataset
+
+```{r, eval = F}
+ss %>%
+    filter(Tissue == 'Villi') %>%
+    
+    # Make villi first level
+    mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+    
+    # order for plot
+    arrange(dataset_label_short, prob_snp_outlier) %>%
+    mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+    
+    # pivot longaer
+    select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, 
+           Trophoblasts:Syncytiotrophoblast) %>%
+    pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+                 names_to = 'component',
+                 values_to = 'estimate') %>% group_by(dataset_label_short, component) %>%
+    summarize(mean = mean(estimate)) %>% pivot_wider(id_cols = dataset_label_short,
+                                                     names_from = component,
+                                                     values_from = mean) %>%
+  write_csv(here::here('Results', '1-1_cell_comp_stats.csv'))
+```
+
+
+# individ cell proportions
+
+Aug 18 - add components
+
+Troph = Troph + STB
+Mes = Stro + endo
+Immune = nRBC + hofb
+
+```{r}
+# inspect the percentiles
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  
+  # add components
+  mutate(Cell_TB = Trophoblasts + Syncytiotrophoblast,
+         Cell_ME = Stromal + Endothelial,
+         Cell_IM = Hofbauer + nRBC) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, Outlier, 
+         contains('Cell_'), GA_cat_epi) %>%
+  
+  pivot_longer(cols = contains('Cell_'),
+               names_prefix = 'Cell_',
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('TB', 
+                                                  'ME', 
+                                                  'IM')))) %>%
+  filter(GA_cat_epi != 'First',
+         dataset != '7') %>% 
+  
+  group_by(dataset,component) %>%
+  summarize(q_05 = quantile(estimate, c(0.05)),
+            q_95 = quantile(estimate, c(0.95)))
+  
+
+ss_comp_cut <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset, prob_snp_outlier) %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, Syncytiotrophoblast)) %>%
+  
+  # add components
+  mutate(Cell_TB = Trophoblasts + Syncytiotrophoblast,
+         Cell_ME = Stromal + Endothelial,
+         Cell_IM = Hofbauer + nRBC) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, GEO_accession, Outlier, 
+         contains('Cell_'), GA_cat_epi) %>%
+  
+  pivot_longer(cols = contains('Cell_'),
+               names_prefix = 'Cell_',
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('TB', 
+                                                  'ME', 
+                                                  'IM')))) %>%
+  filter(dataset != '7') %>% 
+  
+  group_by(dataset,component) %>%
+  
+  # remove those components with no variation
+  mutate(
+    percentile = quantile(estimate, 0.05) == quantile(estimate, 0.95)) %>%
+  filter(!percentile) %>%
+  
+  # create percentile groupings
+  mutate(
+    estimate_percentile = 
+      
+      case_when(
+        percentile ~ "no variation",
+        TRUE ~ as.character(
+          cut(estimate, na.rm = TRUE,
+              labels = c("<5th", "5-95th",">95th"),
+              c(-Inf, unique(quantile(estimate, c(0.05, 0.95))), Inf)))
+      ) %>%
+      factor(levels = c("<5th", "5-95th",">95th"))) %>%
+  ungroup() 
+  
+# check distribution is expected
+ss_comp_cut %>%
+  ggplot(aes(x = component, fill = estimate_percentile)) +
+  geom_bar(stat = 'count', position = 'dodge') +
+  facet_wrap(~dataset)
+
+
+plot_comp_cut <- function(x) {
+    ggplot(data = x, aes(x = Sample_Name, y = estimate,
+                         fill = estimate_percentile)) +
+      geom_bar(stat = 'identity') +
+      #geom_jitter(alpha = 0.5) + 
+      theme_bw() +
+      scale_y_continuous(breaks = scales::extended_breaks(n = 5),
+                         labels = scales::percent) +
+     scale_fill_viridis_d() +
+      theme(panel.border = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_line(),
+            strip.background = element_blank(),
+            strip.placement = 'outside',
+            strip.text.y.left = element_text(angle = 0),
+            panel.grid.major.x = element_blank(),
+            panel.grid.minor.x = element_blank(),
+            #panel.grid.major.y = element_line(color = '#A9A9A9'),
+            #panel.grid.major.y = element_blank(),
+            panel.grid.minor.y = element_blank(),
+            panel.background  = element_rect(),
+            axis.text.x = element_blank(),
+            legend.position = 'right') +
+      labs(x = '', y = '', color = '', fill = '') +
+      facet_grid(cols = vars(dataset),
+                 rows = vars(component),
+                 switch = 'y',
+                 scale = 'free_x')
+}
+
+
+p1 <- ss_comp_cut %>% 
+  filter(component == 'TB') %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, estimate)) %>%
+  plot_comp_cut()
+
+p2 <- ss_comp_cut %>% 
+  filter(component == 'ME') %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, estimate)) %>%
+  plot_comp_cut()
+
+p3 <- ss_comp_cut %>% 
+  filter(component == 'IM') %>%
+  mutate(Sample_Name = fct_reorder(Sample_Name, estimate)) %>%
+  plot_comp_cut()
+
+plot_grid(p1,p2,p3,
+          ncol = 1,
+          align = 'hv')
+```
+
+```{r, eval = TRUE}
+# flag samples
+# for each sample count how many components are in <5th ar >95th percentile
+
+# Flagged if syncytio OR troph is low (<5th)
+# Flagged if immune cell is high (>95th)
+# Flagged if stromal is high (>95th)
+
+(flag_cell <- ss_comp_cut %>% 
+    select(Sample_Name, component, estimate_percentile) %>%
+   
+   pivot_wider(id_cols = Sample_Name,
+               names_from = 'component',
+               values_from = 'estimate_percentile') %>%
+  mutate(Flag_cell_p_TB = TB %in% '<5th',
+         Flag_cell_p_IM = IM %in% '>95th') %>%
+   select(Sample_Name, contains('Flag')))
+
+ss <- ss %>% left_join(flag_cell)
+
+ss %>%
+  filter(!is.na(Flag_cell_p_TB)) %>%
+  select(Sample_Name, dataset, contains('Flag_cell_p')) %>%
+  pivot_longer(cols = contains('Flag_cell_p'),
+               names_to = 'Cell',
+               names_prefix = 'Flag_cell_p_',
+               values_to = 'Flag') %>% 
+  filter(Flag) %>%
+  mutate(dataset = factor(dataset, 
+                          levels = c(1:10, 11, 12, 13))) %>%
+  
+  ggplot(aes(x = dataset, fill =dataset)) +
+  geom_bar(stat = 'count') +
+  geom_point(data = ss %>% 
+               filter(Tissue == 'Villi') %>%
+               count(dataset),
+             aes(x = dataset, y = n, color = dataset),
+             shape = '-', size = 9) +
+  scale_x_discrete(limits = as.character(c(1:10, 11, 12, 13))) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  facet_grid(cols = vars(Cell)) +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, vjust = 0.5),
+        legend.position = '') +
+  labs(y = '', fill = '', title = '# of flagged samples')
+
+# what's up with dataset 9
+ss_comp_cut %>% 
+  filter(GEO_accession == 'GSE71678') %>%
+  
+   ggplot(aes(x = Sample_Name, y = estimate,
+                         fill = estimate_percentile)) +
+      geom_bar(stat = 'identity') +
+      #geom_jitter(alpha = 0.5) + 
+      theme_bw() +
+      scale_y_continuous(breaks = scales::extended_breaks(n = 2),
+                         labels = scales::percent) +
+     scale_fill_viridis_d() +
+      theme(panel.border = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_line(),
+            strip.background = element_blank(),
+            strip.placement = 'outside',
+            strip.text.y.left = element_text(angle = 0),
+            panel.grid.major.x = element_blank(),
+            panel.grid.minor.x = element_blank(),
+            #panel.grid.major.y = element_line(color = '#A9A9A9'),
+            #panel.grid.major.y = element_blank(),
+            panel.grid.minor.y = element_blank(),
+            panel.background  = element_rect(),
+            axis.text.x = element_blank(),
+            legend.position = 'right') +
+      labs(x = '', y = '', color = '', fill = '') +
+      facet_grid(
+                 rows = vars(component),
+                 switch = 'y',
+                 scale = 'free_x')
+ss_comp_cut %>% 
+  filter(GEO_accession == 'GSE71678') %>%
+  ggplot(aes(x = estimate_percentile)) +
+  geom_bar(stat = 'count') +
+  facet_grid(cols = vars(component))
+  
+
+# table of percentiles
+(ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, GEO_accession, Outlier, 
+         Trophoblasts:Syncytiotrophoblast,GA_cat_epi) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 
+                                                  'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  filter(GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>% 
+  
+  group_by(GA_cat_epi,component) %>%
+  summarize(`<5th percentile` = quantile(estimate, 0.05),
+            `>95th percentile` = quantile(estimate, 0.95)) %>%
+  ungroup() %>%
+  write_csv(here::here('data', 'raw', '1-1_cell-comp-percentiles.csv'))) 
+  
+# plot percentiles
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset, GEO_accession, Outlier, 
+         Trophoblasts:Syncytiotrophoblast,GA_cat_epi) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 
+                                                  'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  filter(GA_cat_epi != 'First',
+         GEO_accession != 'GSE98938') %>% 
+  
+  group_by(GA_cat_epi,component) %>%
+  summarize(`<5th percentile` = quantile(estimate, 0.05),
+            `>95th percentile` = quantile(estimate, 0.95)) %>%
+  ungroup() %>%
+  ggplot(aes(x = component, ymin = `<5th percentile`, 
+             ymax = `>95th percentile`, color = GA_cat_epi)) +
+  geom_linerange(size = 2, position = position_dodge(width = 0.25)) +
+  labs(title = '5-95th percentiles', x = '', color = '') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+# flag samples on bar composition graph
+ss_comp_cut %>%
+  
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           width = 1, 
+           aes(x = Sample_Name, y = estimate, fill = estimate_percentile)) +
+  facet_grid(cols = vars(dataset), 
+             rows = vars(component),
+             scale = 'free', space = 'free',
+             switch = 'x') +
+      scale_fill_viridis_d() +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.25), breaks = c(0, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = 0, hjust = 0),
+        strip.placement = 'outside',
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = 'right') +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = '', fill = 'percentile')
+  }
+  
+
+# flag samples on bar composition graph
+## decreased troph
+ss_comp_cut %>%
+  
+  # order component levels for plot
+  left_join(flag_cell) %>%
+  {
+    ggplot(data = .) +
+      geom_bar(
+        stat = 'identity',
+        width = 1,
+        aes(
+          x = Sample_Name,
+          y = estimate,
+          fill = as.factor(Flag_cell_p_TB)
+        )
+      ) +
+      facet_grid(
+        cols = vars(dataset),
+        rows = vars(component),
+        scale = 'free',
+        space = 'free',
+        switch = 'x',
+      ) +
+      scale_fill_viridis_d(option = 'E') +
+      theme_bw() +
+      scale_y_continuous(
+        limits = c(-0.1, 1.25),
+        breaks = c(0, 1),
+        labels = scales::percent,
+        expand = c(0, 0)
+      ) +
+      theme(
+        axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = 0, hjust = 0),
+        strip.placement = 'outside',
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = 'right'
+      ) +
+      coord_cartesian(ylim = c(0, 1)) +
+      labs(
+        x = '',
+        y = '',
+        fill = '',
+        title = 'Flagged for decreased trophoblasts'
+      )
+  }
+
+## Increased immune
+ss_comp_cut %>%
+  
+  left_join(flag_cell) %>%
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           width = 1, 
+           aes(x = Sample_Name, y = estimate, 
+               fill = as.factor(Flag_cell_p_IM))) +
+  facet_grid(cols = vars(dataset), 
+             rows = vars(component),
+             scale = 'free', space = 'free',
+             switch = 'x') +
+      scale_fill_viridis_d(option = 'E') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.25), breaks = c(0, 1), 
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.text.y = element_text(angle = 0, hjust = 0),
+        strip.placement = 'outside',
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = 'right') +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = '', fill = '', title = 'Flagged for increased hofb/nRBC')
+  }
+
+```
+## Generate table
+
+```{r, eval = FALSE}
+(ss %>%
+  group_by(dataset) %>%
+  summarize(`Decreased trophoblasts` = sum(Flag_cell_p_TB, na.rm = TRUE),
+            `Increased immune` = sum(Flag_cell_p_IM, na.rm = TRUE),
+            `Increased TB/IM` = sum(Flag_cell_p_TB == TRUE |
+                                      Flag_cell_p_IM == TRUE,
+                                    na.rm = TRUE)) %>%
+  mutate_if(is.numeric, ~ifelse(. == 0, NA_integer_, .)) %>%
+  write_csv(here::here('data', 'raw', '1-1_cell-outliers.csv'), na = ''))
+ 
+# result does not change if using p(outlier) > 0.1-0.2
+(ss %>%
+  group_by(dataset) %>%
+  summarize(Flag_troph_all = sum(
+    Flag_XY_contam == 'Flagged' &
+      prob_snp_outlier > 0.2 &
+      Flag_cell_p_TB == 1,
+    na.rm = TRUE
+  ),
+  Flag_immu_all = sum(
+    Flag_XY_contam == 'Flagged' &
+      prob_snp_outlier > 0.2 &
+      Flag_cell_p_IM == 1,
+    na.rm = TRUE
+  )) %>%
+  mutate_if(is.numeric, ~ifelse(. == 0, NA_integer_, .)) %>%
+  write_csv(here::here('data', 'raw', '1-1_cell-outliers-overlap.csv'), 
+            na = ''))
+```
+
+
+# analyze cell outliers
+
+```{r}
+ss %>%
+  filter(!is.na(Flag_cell_p_TB)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_TB) > 2) %>%
+  ungroup() %>%
+  ggplot(aes(x = Flag_cell_p_TB, y = prob_snp_outlier, fill = Flag_cell_p_TB)) +
+  geom_boxplot() +
+  facet_grid(cols = vars(dataset),
+             switch = 'x') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_fill_discrete(labels = c('Normal TB', 'Low TB')) +
+  labs(y = 'P(outlier)', x= 'Dataset')
+
+# lm in each dataset
+ss %>%
+  filter(!is.na(Flag_cell_p_TB)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_TB) > 2) %>%
+  nest() %>%
+  mutate(results = purrr::map(data, ~lm(data =., 
+                                        prob_snp_outlier ~ Flag_cell_p_TB) %>%
+                                tidy())) %>%
+  select(-data) %>%
+  unnest(cols = c(results)) %>%
+  filter(term == 'Flag_cell_p_TBTRUE') %>%
+  select(-term) %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+
+# lm in all, adjusted for dataset
+ss %>%
+  filter(!is.na(Flag_cell_p_TB)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_TB) > 2) %>%
+  ungroup() %>%
+  lm(data = ., prob_snp_outlier ~ Flag_cell_p_TB + dataset) %>%
+  tidy() %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+```
+
+Repeat for immune (IM)
+
+```{r}
+ss %>%
+  filter(!is.na(Flag_cell_p_IM)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_IM) > 2) %>%
+  ungroup() %>%
+  ggplot(aes(x = Flag_cell_p_IM, y = prob_snp_outlier, fill = Flag_cell_p_IM)) +
+  geom_boxplot() +
+  facet_grid(cols = vars(dataset),
+             switch = 'x') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_fill_discrete(labels = c('Normal IM', 'High IM')) +
+  labs(y = 'P(outlier)', x= 'Dataset')
+
+# lm in each dataset
+ss %>%
+  filter(!is.na(Flag_cell_p_IM)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_IM) > 2) %>%
+  nest() %>%
+  mutate(results = purrr::map(data, ~lm(data =., 
+                                        prob_snp_outlier ~ Flag_cell_p_IM) %>%
+                                tidy())) %>%
+  select(-data) %>%
+  unnest(cols = c(results)) %>%
+  filter(term == 'Flag_cell_p_IMTRUE') %>%
+  select(-term) %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+
+# lm in all, adjusted for dataset
+ss %>%
+  filter(!is.na(Flag_cell_p_IM)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_cell_p_IM) > 2) %>%
+  ungroup() %>%
+  lm(data = ., prob_snp_outlier ~ Flag_cell_p_IM + dataset) %>%
+  tidy() %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+```
+
+
+## NTD
+
+```{r}
+p5 <- ss %>%
+  # subset to RSA
+  filter(dataset_label_short %in% c('NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(Group, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight certain samples
+  mutate(highlight = ifelse(prob_snp_outlier > 0.12, 'highlight', NA_character_)) %>%
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           aes(x = Sample_Name, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE,
+           width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  theme_bw() + 
+  scale_y_continuous(limits = c(0,0.25), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(x = '', y = '', fill = '')
+    };p5
+
+p6 <- ss %>%
+  filter(dataset_label_short %in% c('NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(Group, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, prob_snp_outlier, 
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal',
+                                                  'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  mutate(highlight = ifelse(prob_snp_outlier > 0.13, 'highlight', NA_character_)) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component),
+           width = 1) +
+      geom_bar(data = . %>% 
+                 filter(!is.na(highlight)) %>%
+                 mutate(estimate = 1), 
+               stat = 'identity',
+               aes(x = Sample_Name, y = estimate),
+               alpha = 0, show.legend = FALSE,
+               color = 'black',
+               size = 0.5,
+               width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = '', fill = '')
+    };p6
+
+
+p7a <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('NTD'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(Group, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = Group)) +
+    geom_tile(aes(y = 'Group'), color = NA) +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+    guides(fill = guide_legend(ncol = 2)) +
+    scale_y_discrete(expand = c(0,0)) +
+    scale_fill_brewer(palette = 'Set3') +
+    guides(fill = guide_legend(override.aes = list(colour = NA))) +
+    labs(y = '', fill = '')
+  };p7a
+
+p7b <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('NTD'),
+         Tissue == 'Villi') %>%
+  
+  # order for plot
+  arrange(Group, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  ggplot(aes(x = Sample_Name, y = GA, ymax = GA)) +
+  geom_pointrange(ymin = 0) +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+  scale_y_continuous(limits = c(10, 25)) +
+  labs(x = ''); p7b
+
+plot_grid(p5, p6, p7a, ncol = 1, align = 'v', axis = 'lr', 
+          rel_heights = c(1,1,0.65))
+```
+
+### ACA + ART
+
+```{r}
+p7 <- ss %>%
+  # subset to ART
+  filter(dataset_label_short %in% c('ART', 'ACA'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.11, 'highlight', NA_character_)) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, highlight,
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component),
+           width = 1) +
+      geom_bar(data = . %>% 
+                 filter(highlight == 'highlight') %>%
+                 mutate(estimate = 1),
+               stat = 'identity',
+               aes(x = Sample_Name, y = estimate),
+               size = 0.5,
+               alpha = 0,
+               color = 'black',
+               width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        plot.margin = unit(c(5.5,5.5,-2,5.5), 'pt')) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+  }
+
+p8 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART', 'ACA'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.11, 'highlight', NA_character_)) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           aes(x = Sample_Name, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE,
+           width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  theme_bw() + 
+      scale_y_continuous(limits = c(0,0.22), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+      scale_fill_discrete() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs( y = 'Contamination', fill = '')
+  }
+
+
+p9 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART', 'ACA'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  
+  
+  
+  # get outlier in there  
+  pivot_longer(cols = c(Group, Outlier),
+               names_to = 'Group',
+               values_to = 'value') %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.11, 'highlight', NA_character_),
+         value = ifelse(value == 'Not outlier', NA_character_, value)) %>%
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = value, y = Group)) +
+    geom_tile(aes(y = Group), color = NA) +
+    geom_tile(data = . %>% 
+                   filter(highlight == 'highlight'),
+                 size = 0.5,
+                 alpha = 0,
+                 color = 'black') +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+    guides(fill = guide_legend(ncol = 2)) +
+    scale_y_discrete(expand = c(0,0)) +
+    scale_fill_brewer(palette = 'Set3') +
+    guides(fill = guide_legend(override.aes = list(colour = NA))) +
+    labs(y = '', fill = '')
+  }
+
+
+
+plot_grid(p8, p7, p9, ncol = 1, align = 'v', axis = 'lr', 
+          rel_heights = c(1,1,0.6))
+```
+
+### Stats
+
+```{r}
+ss %>% 
+  filter(dataset_label_short == 'NTD') %>%
+  select(Sample_Name, Group, prob_snp_outlier, Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = c(Trophoblasts:Syncytiotrophoblast), 
+               names_to = 'Component', 
+               values_to = 'proportion') %>%
+  nest(data = c(Sample_Name, Group, proportion, prob_snp_outlier)) %>%
+  mutate(lm = map(data, ~lm(proportion~prob_snp_outlier + Group, data = .) %>%
+                    tidy)) %>%
+  unnest(lm) %>%
+  filter(!grepl("Intercept", term)) %>%
+  select(Component, term, estimate:p.value)
+```
+
+
+## ART 
+
+```{r}
+p7 <- ss %>%
+  # subset to ART
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  # pivot longaer
+  select(Sample_Name, contains('Tissue'), GA, dataset_label_short, Outlier, highlight,
+         Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = Trophoblasts:Syncytiotrophoblast,
+               names_to = 'component',
+               values_to = 'estimate') %>%
+  
+  # order component levels for plot
+  mutate(component = fct_relevel(component, rev(c('Trophoblasts', 'Stromal', 'Endothelial', 
+                                                  'Hofbauer', 'nRBC')))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', aes(x = Sample_Name, y = estimate, fill = component),
+           width = 1) +
+      geom_bar(data = . %>% 
+                 filter(highlight == 'highlight') %>%
+                 mutate(estimate = 1),
+               stat = 'identity',
+               aes(x = Sample_Name, y = estimate),
+               size = 0.5,
+               alpha = 0,
+               color = 'black',
+               width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  theme_bw() +
+  scale_y_continuous(limits = c(-0.1,1.1), breaks = c(0, 0.5, 1), labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.text.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        plot.margin = unit(c(5.5,5.5,-2,5.5), 'pt')) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = '', y = 'Cell composition', fill = '')
+  }
+
+p8 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # highlight certain samples
+  {
+  ggplot(data = .) +
+  geom_bar(stat = 'identity', 
+           aes(x = Sample_Name, y = prob_snp_outlier, fill = highlight),
+           show.legend = FALSE,
+           width = 1) +
+  facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+  theme_bw() + 
+      scale_y_continuous(limits = c(0,0.22), breaks = c(0, 0.1, 0.2),
+                     labels = scales::percent,
+                     expand = c(0,0)) +
+      scale_fill_discrete() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs( y = 'Contamination', fill = '')
+  }
+
+p9 <- ss %>%
+  # subset to 
+  filter(dataset_label_short %in% c('ART'),
+         Tissue == 'Villi') %>%
+  
+  # Make villi first level
+  mutate(Tissue = fct_relevel(Tissue, 'Villi')) %>%
+  
+  
+  # order for plot
+  arrange(dataset_label_short, Syncytiotrophoblast) %>%
+  mutate(Sample_Name = fct_inorder(as.character(Sample_Name))) %>%
+  
+  # get outlier in there  
+  pivot_longer(cols = c(Group, Outlier),
+               names_to = 'Group',
+               values_to = 'value') %>%
+  
+  # highlight
+  mutate(highlight = ifelse(prob_snp_outlier > 0.1, 'highlight', NA_character_)) %>%
+  
+  {
+    ggplot(data = ., aes(x = Sample_Name, fill = value, y = Group)) +
+    geom_tile(aes(y = Group), color = NA) +
+    geom_tile(data = . %>% 
+                   filter(highlight == 'highlight'),
+                 size = 0.5,
+                 alpha = 0,
+                 color = 'black') +
+    theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          axis.text.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.border = element_blank(),
+          legend.position = 'bottom',
+          strip.background = element_blank(),
+          strip.text = element_blank(),
+          plot.title = element_blank(),
+          plot.subtitle = element_blank(),
+          plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) +
+    facet_grid(cols = vars(dataset_label_short), scale = 'free', space = 'free') +
+    guides(fill = guide_legend(ncol = 2)) +
+    scale_y_discrete(expand = c(0,0)) +
+    scale_fill_brewer(palette = 'Set3') +
+    guides(fill = guide_legend(override.aes = list(colour = NA))) +
+    labs(y = '', fill = '')
+  }
+
+plot_grid(p8, p7, p9,  ncol = 1, rel_heights = c(1, 1, 0.65), align = 'v', axis = 'lr') #3.5, w:6.5
+
+
+
+ss %>% filter(dataset_label_short == 'ART', prob_snp_outlier > 0.1)
+ss %>% filter(dataset_label_short == 'ART') %>% summarize(mean(prob_snp_outlier))
+
+```
+
+### stats
+
+```{r}
+ss %>% 
+  filter(dataset_label_short == 'ART') %>%
+  select(Sample_Name, Outlier, Trophoblasts:Syncytiotrophoblast) %>%
+  pivot_longer(cols = -c(Sample_Name, Outlier), 
+               names_to = 'Component', 
+               values_to = 'proportion') %>%
+  nest(data = c(Sample_Name, Outlier, proportion)) %>%
+  mutate(lm = map(data, ~lm(proportion~Outlier, data = .) %>%
+                    tidy)) %>%
+  unnest(lm) %>%
+  filter(grepl("Outlier", term)) %>%
+  select(Component, estimate:p.value)
+```
+
+# PE
+
+```{r}
+p_pe <- ss %>%
+  filter(dataset_label_short %in% c('PE1', 'PE2')) %>%
+  pivot_longer(cols = c(Trophoblasts:Syncytiotrophoblast), 
+               names_to = 'Component', 
+               values_to = 'proportion') %>%
+  mutate(Group = fct_relevel(Group, c('Control', 'IUGR', 'LOPET', 'EOPET'))) %>%
+  ggplot(aes(x = Group, y = proportion, fill = Component)) +
+  geom_boxplot() +
+  facet_grid(dataset_label_short ~ Component,
+             scales = "free") +   
+  theme_bw() +
+    theme(axis.ticks.x = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x = element_blank(),
+          panel.border = element_blank(),
+          axis.line = element_line(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          strip.background = element_blank(),
+          legend.position = '')+ 
+  scale_fill_manual(values = color_code_tissue, na.value = 'grey') +
+  scale_y_continuous(labels = scales::percent);p_pe
+```
+
+## Stats
+
+```{r}
+pe_stats <- ss %>%
+  filter(dataset_label_short %in% c('PE1', 'PE2')) %>%
+  pivot_longer(cols = c(Trophoblasts:Syncytiotrophoblast), 
+               names_to = 'Component', 
+               values_to = 'proportion') %>%
+  
+  select(Sample_Name, dataset_label_short, Group, Component, proportion) %>%
+  mutate(Group = fct_relevel(Group, c('Control', 'IUGR', 'LOPET', 'EOPET'))) %>%
+  
+  nest(data = c(Sample_Name, Group, proportion)) %>%
+  mutate(lm = map(data, ~lm(proportion~Group, data = .) %>%
+                    tidy)) %>%
+  unnest(lm) %>%
+  filter(grepl("Group", term)) %>%
+  select(dataset_label_short, Component, term, estimate:p.value) %>%
+  filter(p.value < 0.05) 
+pe_stats
+```
+
+# list of highly contaminated samples
+
+```{r, eval = FALSE}
+ss %>%
+  filter(prob_snp_outlier > 0.1, Tissue == 'Villi') %>%
+  select(Sample_Name, prob_snp_outlier, dataset_label_short) %>%
+  write_csv(here::here('Results', '1-1_list-of-contaminated-samples.csv'))
+```
+
+
+# Save
+
+```{r, eval = FALSE}
+saveRDS(ss, here::here('data', 'r objects', '1-1_ss.rds'))
+write_csv(pe_stats, here::here('Results', '1-1_pe_stats.csv'))
+```
+
