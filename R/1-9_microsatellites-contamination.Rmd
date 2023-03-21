@@ -1,0 +1,468 @@
+---
+title: "Validating with microsatellites"
+author: "Victor Yuan"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+To test if there is correlation between DNAm-based contamination and microsatellites
+
+## Load methylation data
+
+```{r, message = FALSE}
+library(tidyverse)
+library(planet)
+library(readxl)
+library(broom)
+library(ggrepel)
+
+ss <- read_csv(here::here('data', 'raw', '1-4_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+# ggplot
+colors_tissue <- c('Amnion' = '#26A9AD', 
+                   'Basal plate' = '#FEDBF4',
+                   'Chorion' = '#FF3300',
+                   'Cytotrophoblast' = '#FBC02D',
+                   'Decidua' = '#FF2BFF',
+                   'Maternal Blood' = '#6396F2',
+                   'Villi' = '#BDB9B7',
+                   'Villi maternal' = 'lightblue')
+
+```
+### Maternal villi and amnion/chorion
+
+Ok, lastly: PM372, PM375, PM376 are  maternal villi samples
+
+These I had not originally analyzed in this project. I processed these samples and last thing to do is apply the pca projection.
+
+```{r}
+# load the methylation data and apply pca
+ss_vm <- read_csv(here::here('data', 'r objects', '0-1_ss-vm.csv'))
+bmiq_vm <- readRDS(here::here('data', 'r objects', '0-1_bmiq-vm.rds'))
+
+#script to project pca
+source(here::here('r', 'project_mbd_pca.R'))
+
+pca_mbd <- project_mbd_pca(bmiq_vm)
+pca_mbd
+```
+
+
+```{r}
+ss <- bind_rows(ss %>% mutate(dataset = as.character(dataset)),
+          ss_vm %>% 
+  select(Sample_Name, Sex, prob_snp_outlier, contains('normalized_'), 
+         controls_failed:GA_epi_RRPC) %>%
+  mutate(dataset = 'villi maternal',
+         dataset_label = 'Villi (maternal side)',
+         Group = 'Healthy', dataset_label_short = 'vm',
+         Tissue_gen = 'Placenta', Tissue_gen2 = 'Placenta (Villi maternal)'))
+
+ss <- ss %>%
+  left_join(pca_mbd, by= 'Sample_Name')
+
+ss %>% 
+  mutate(dataset = as.character(dataset)) %>%
+  ggplot(aes(x = PC1_mbd500.y, y = dataset, fill = Tissue)) +
+  geom_boxplot() +
+  theme_bw()  +
+  theme(panel.border = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line =element_line()) #+
+  scale_fill_manual(values = colors_tissue)
+```
+## Load microsatellite data
+
+```{r}
+data_micro1 <- readxl::read_xlsx(
+  here::here('data', 'microsatellites', 
+             'Contamination study result database_EA.xlsx'))
+
+data_micro2 <- readxl::read_xlsx(
+  here::here('data', 'microsatellites', 
+             '2022-03-03 Aminion Contamination Data.xlsx')) 
+
+data_micro <- 
+  bind_rows(data_micro1, 
+          data_micro2 %>% 
+            mutate(`ALELLE 1 size` = as.character(`ALELLE 1 size`),
+                   `ALELLE 2 size` = as.character(`ALELLE 2 size`),
+                   `ALELLE 3 size` = as.character(`ALELLE 3 size`),
+                   `ALELLE 4 size` = as.character(`ALELLE 4 size`),
+                   `ALELLE 2 area` = as.character(`ALELLE 2 area`),
+                   `ALELLE 3 area` = as.character(`ALELLE 3 area`)))
+```
+
+The column `SAMPLE ID` will serve as base to create the following new columns:
+
+- Sample_Name: should match the sample names in DNAm ss
+- Tissue
+- Case ID: Right now case ID is incomplete
+
+# Data cleaning Sample_Name
+
+```{r}
+sum(data_micro$`SAMPLE ID` %in% ss$Sample_Name)
+```
+No matches currently
+
+```{r}
+# create a working copy of the data
+d <- data_micro
+
+d %>% select(`SAMPLE ID`)
+```
+### Add underscore:
+
+```{r}
+d <- d %>% 
+  mutate(Sample_Name = 
+           
+           # add underscore between case and tissue
+           sub('(\\d) *(\\D)', '\\1_\\2', `SAMPLE ID`))
+d %>% 
+  select(Sample_Name, `SAMPLE ID`)  
+```
+### Remove space and following 
+
+```{r}
+d <- d %>% 
+  mutate(Sample_Name = 
+           
+           #remove everything after the space
+           sub(' .*',  '', Sample_Name))
+
+d %>% select(Sample_Name, `SAMPLE ID`) %>%
+  filter(grepl(' .*', `SAMPLE ID`)) %>% head 
+```
+### Remove asterisk
+
+```{r}
+d <- d %>%
+  mutate(Sample_Name = sub('\\*',  '', Sample_Name))
+
+d %>% select(Sample_Name, `SAMPLE ID`) %>%
+  filter(grepl('\\*', `SAMPLE ID`)) 
+```
+### Check matches
+
+```{r}
+sum(d$Sample_Name %in% ss$Sample_Name)
+```
+### "_v" not "_vc"
+
+Some FTs need to be "_v" instead of "_vc"
+
+```{r}
+d %>%
+  select(Sample_Name) %>%
+  filter(grepl('(FT)(38|39|41|42|59|60)_vc', Sample_Name)) %>% distinct()
+```
+
+```{r}
+ss  %>%
+  select(Sample_Name) %>%
+  filter(grepl('(FT)(38|39|41|42|59|60)_v+', Sample_Name))
+```
+```{r}
+d <- d %>% 
+  mutate(Sample_Name = gsub('(FT)(38|39|41|42|59|60)_vc', '\\1\\2_v',
+                            Sample_Name))
+d %>% 
+  select(Sample_Name, `SAMPLE ID`) %>%
+  filter(grepl('(FT)(38|39|41|42|59|60)_v.*', Sample_Name))
+```
+
+```{r}
+sum(d$Sample_Name %in% ss$Sample_Name)
+```
+### NTD_3_v not NTD3_vc
+
+There's a space between the letters and numbers in `ss`, but not `d`. They also are denoted as "vc" in `d`, but "v" in `ss`.
+
+```{r}
+d %>%
+  select(Sample_Name, `SAMPLE ID`) %>%
+  filter(grepl('NTD(3|9)_vc', Sample_Name)) %>% distinct()
+```
+
+```{r}
+ss %>%
+  select(Sample_Name) %>%
+  filter(grepl('NTD_(3|9)_v.*', Sample_Name))
+```
+
+```{r}
+d <- d %>%
+  mutate(Sample_Name = gsub('(NTD)(3|9)_vc', '\\1_\\2_v',  
+                                Sample_Name))
+
+d %>%
+  select(Sample_Name, `SAMPLE ID`) %>%
+  filter(grepl('NTD(3|9)v.*', `SAMPLE ID`)) %>% distinct()
+```
+
+```{r}
+sum(d$Sample_Name %in% ss$Sample_Name)
+```
+
+### PL64 PL96
+
+Why are  PL64, PL96 not matching: 
+```{r}
+ss %>% filter(grepl('PL64|PL96', Sample_Name)) %>%
+  arrange(Sample_Name) %>% 
+  pull(Sample_Name) 
+```
+
+```{r}
+d %>% 
+  filter(grepl('(PL64|PL96)_(r|v).*', Sample_Name)) %>% 
+  select(Sample_Name, `SAMPLE ID`)
+```
+PL64_r2vc -> PL64_r2
+PL96_v1v2vc -> PL96v1v2
+
+```{r}
+d <-d %>%
+  mutate(Sample_Name = gsub('PL64_r2vc', 'PL64_r2',  
+                                gsub('PL96_v1v2vc', 'PL96v1v2', 
+                                     Sample_Name))) 
+
+d %>% 
+  filter(grepl('PL64_r2|PL96v1v2', Sample_Name)) %>% 
+  select(Sample_Name, `SAMPLE ID`)
+```
+```{r}
+sum(d$Sample_Name %in% ss$Sample_Name)
+```
+### villi maternal
+
+```{r}
+d <-d %>%
+  mutate(Sample_Name = gsub('_vm', '_mv',  Sample_Name))
+
+d %>% 
+  filter(grepl('mv', Sample_Name)) %>% 
+  select(Sample_Name, `SAMPLE ID`)
+```
+
+# Case_id
+
+```{r}
+d %>%
+  pull(Sample_Name)
+```
+```{r}
+d <- d %>%
+  mutate(case_id = str_extract(Sample_Name, '[:alnum:]+'))
+
+d %>%
+  select(Sample_Name, case_id) %>% distinct() %>% arrange(case_id)
+```
+NTD_3, NTD_9 need fixing since they have an underscore in the middle
+
+```{r}
+d <- d %>%
+  mutate(case_id = ifelse(case_id == 'NTD',
+                          str_replace(Sample_Name, '(NTD)_(3|9).*', '\\1\\2'),
+                          case_id))
+
+d  %>%
+  select(Sample_Name, `SAMPLE ID`, case_id) %>%
+  filter(grepl('NTD_(3|9).*', Sample_Name))
+
+d$case_id
+```
+PL96v1v2 needs fixing
+
+```{r}
+d <- d %>%
+  mutate(case_id = ifelse(case_id == 'PL96v1v2', 'PL96', case_id))
+```
+
+## Tissue
+
+```{r}
+d$Sample_Name %>%
+  str_replace('[:alpha:]+[:digit:]+_*', '') %>% unique()
+```
+
+```{r}
+d <- d %>% 
+  mutate(Tissue = case_when(
+    grepl('v[^m]', Sample_Name) ~ 'Villi',
+    grepl('v$', Sample_Name) ~ 'Villi',
+    grepl('mv', Sample_Name) ~ 'Villi maternal',
+    grepl('r2', Sample_Name) ~ 'Villi',
+    grepl('dec', Sample_Name) ~ 'Decidua',
+    grepl('matwb', Sample_Name) ~ 'Maternal blood',
+    grepl('am', Sample_Name) ~ 'Amnion',
+    grepl('ch', Sample_Name) ~ 'Chorion'
+  )) 
+d %>%
+  select(Sample_Name, Tissue)
+```
+
+
+## Join microsatellite data `d` to dnam data `ss`
+
+Compare the list I sent to EA/MP originally to make sure all samples accounted for:
+
+```{r}
+samples <- 
+  read_csv(here::here('data', 'raw', '1-6_DNAm contamination Victor follow-up samples.csv'))
+
+all(samples$Sample_Name %in% ss$Sample_Name)
+```
+
+```{r}
+all(samples$Sample_Name %in% d$Sample_Name)
+```
+After accounting for all matches, we can join:
+
+```{r}
+data <- d %>% 
+  rename(Sample_Name_microsat = `SAMPLE ID`) %>%
+  select(Sample_Name, case_id, Tissue, `Approx % contamination`, 
+         `MARKER TESTED`,`PCR date (yyyy-mm-dd)`,                                       
+         `Analyzer Date (mm-dd-yy)` , result, coments ) %>%
+  mutate(`Approx % contamination` = as.numeric(`Approx % contamination`)) %>%
+  
+  left_join(ss %>% select(-Tissue), 
+            by= 'Sample_Name')
+
+data
+```
+
+# Compare micro vs dna-contam
+
+```{r}
+data %>% 
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier))  %>%
+  pull(Sample_Name) %>% unique %>% length
+  
+```
+There are 22 villi samples that have microsat data. 3 additional for the maternal villi.
+
+Evie recently sent additional chorion samples, that will be included later.
+
+### P(SNPoutlier)
+
+```{r}
+data %>% 
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier)) %>%
+  {
+    ggplot(data =., aes(x = prob_snp_outlier, y = `Approx % contamination`)) +
+      geom_point() +
+      geom_smooth(method = 'lm') +
+      geom_text_repel(data = . %>%
+                        filter(
+                          grepl('(_)(mv|ch|am)', Sample_Name)
+                          #prob_snp_outlier > 0.125
+                          ),
+                      aes(label = Sample_Name),
+                      nudge_y = 5) +
+      labs(x = "P(outlier)", y = '% contamination (microsatellites)') +
+      theme_bw() +
+      theme(panel.border = element_blank(), 
+        panel.grid.minor.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line =element_line())
+  }
+```
+
+is it significant?
+
+```{r}
+lm( `Approx % contamination` ~ prob_snp_outlier,
+  data = data %>%
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier))) %>%
+  tidy()
+```
+p = 0.0335
+
+What are those outliers?
+```{r}
+data %>% 
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier),
+         `Approx % contamination` > 4) 
+```
+Is it still significant after removing those high samples?
+
+```{r}
+data %>% 
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier),
+         
+         `Approx % contamination` < 8) %>%
+  ggplot(aes(x = prob_snp_outlier, y = `Approx % contamination`)) +
+  geom_point() +
+  geom_smooth(method = 'lm') 
+```
+
+### PC1 
+
+```{r}
+data %>%
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier),
+         !is.na(PC1_mbd500_category)) %>%
+  mutate(PC1_mbd500_category = fct_reorder(PC1_mbd500_category, PC1_mbd500)) %>%
+  ggplot(aes(x = PC1_mbd500_category, y= `Approx % contamination` )) +
+  geom_boxplot() +
+  geom_jitter()
+```
+```{r}
+data %>%
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier)) %>%
+  ggplot(aes(x = PC1_mbd500, y= `Approx % contamination` )) +
+  geom_point() +
+  geom_smooth(method = 'lm')
+
+# exclude villi maternal
+
+
+```
+seems like a relationship exists, is it statistically significant?
+
+```{r}
+lm( `Approx % contamination` ~ PC1_mbd500,
+  data = data %>%
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier))) %>%
+  glance()
+```
+p = 3.2e-17
+
+Remove pl31 am ch
+
+```{r}
+data %>% 
+  filter(!is.na(`Approx % contamination`) &
+           !is.na(prob_snp_outlier),
+         
+         `Approx % contamination` < 8) %>%
+  ggplot(aes(x = PC1_mbd500, y= `Approx % contamination` )) +
+  geom_point() +
+  geom_smooth(method = 'lm')
+```
+
+
+
+
+
