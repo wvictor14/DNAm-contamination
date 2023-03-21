@@ -10,3 +10,5 @@
 *.db
 *.xlt
 *checkpoint.ipynb
+.Rproj.user
+*.Rproj
