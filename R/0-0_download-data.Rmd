@@ -1,0 +1,793 @@
+---
+title: "Download data"
+author: "Victor Yuan"
+date: "05/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This script:
+
+- Describes datasets and samples used in this project
+- Loads in raw idat files and saves as output .rds files of rgset object to be used in downstream scripts
+- Runs ewastools pipeline to determine normalized XY intensity and call outlier status based on SNP distributions, saves this as pdata, one for each dataset
+
+
+# Description of datasets
+
+1. **Preeclampsia (PE) **
+
+Sam's and brian cox
+
+2. **Chorioamnionitis (ACA)**
+
+From the dataset:
+
+Konwar C et al 2018 *DNA methylation profiling of acute chorioamnionitis-associated placentas and fetal membranes: insights into epigenetic variation in spontaneous preterm births*
+
+44 preterm placentas (22 aCa, 22 non-aCa)
+16 of above have matched chorion and amnion (9 aCa, 7 non-aCa)
+850k 
+
+3. **NTD**
+From Price et al. 2016
+
+
+4. **Other**
+
+Decidua 6 samples from 7 week placentas investigating recurrent spontaneous abortion. 
+
+## New datasets (july 2021)
+
+5. GSE98938 Zhang 2021, Cytotroph meth + histones. Various tissues + cyto. Healthy
+
+6. GSE75248 Paquette Marsit 2016, RICHS neurobehav, 335 villi
+
+7. GSE71678 Green (Marsit) 2016, New hampshire birth cohort, arsenic expo, 343 villi
+
+8. GSE93208 Nordor 2017, 19 Villous Cytotrophoblast in first/second trim.
+
+9. GSE1678885 Fry, ELGAN < 28 GA 411 villi. 
+
+10. GSE125605 PE
+
+11. GSE75196
+
+## Villi maternal (March 2022)
+
+PM372_vm
+PM375_vm
+PM376_vm
+
+# Download data
+
+Here I load idats and save resulting data as `.rds` files for easier loading in downstream analysis.
+
+# extract control metrics
+
+some code to extract control metric data
+
+```
+# summarized over a dataset
+# n failed per control metric
+
+map(a, ~sum(. < attr(., "threshold"))) %>% 
+  as_tibble %>% 
+  write_csv(here::here('data', 'raw', '0-0_temp.csv'))
+```
+
+## ACA
+
+note that PL31_amc amnion sample was not published because of suspected quality / contamination issues
+
+850k, batch 7
+
+```{r}
+library(minfi)
+library(tidyverse)
+library(here)
+library(readxl)
+library(ewastools)
+
+master_ss <- read_xlsx('Z:/ROBLAB6 InfiniumSequenom/Master_Sample_Sheet.xlsx')
+
+ss_b7 <- master_ss %>%
+  filter(Batch == 'Batch 7')
+ss_b7
+
+ # show duplicates
+ss_b7 %>%
+  group_by(Basename) %>% 
+  filter(n() > 1)
+```
+
+I excluded sample pl29_amc / pl29_chc because there seems to be a duplicate entry and conflicting metadata for these samples.
+
+```{r}
+# exclude duplicates
+ss_b7 <- ss_b7 %>% 
+  group_by(Basename) %>% 
+  filter(n() == 1)
+ss_b7
+
+# load idats
+rgset_ACA <- read.metharray.exp(targets = ss_b7, extended = TRUE)
+
+# get normalized X Y intensity, and genotype outlier probability,
+# and controls metrics, #detp
+et_ACA <- read_idats(ss_b7$Basename)
+sex_geno <- function(et_object, rgset, pdata_in) {
+  
+  predicted_sex <- check_sex(et_object %>% correct_dye_bias())
+  
+  #ewastools pipeline
+  snps <- et_object$manifest[probe_type=="rs",index]
+  et_betas <- dont_normalize(et_object)
+  snps <- et_betas[snps,]
+  
+  # fit mixture model to call genotypes
+  snps_called <- call_genotypes(snps, learn = T)
+  
+  pdata_out <- pdata_in %>% 
+    mutate(prob_snp_outlier = colMeans(snps_called$outliers, na.rm = T),
+           prob_snp_outlier_logodds = snp_outliers(snps_called),
+           normalized_x_intensity = predicted_sex$X,
+           normalized_y_intensity = predicted_sex$Y,
+           controls_failed = sample_failure(control_metrics(et_object)),
+           
+           # detection p > 0.01,  failed in more than 5% of data?
+           detp_05 = colMeans(
+             minfi::detectionP(
+               rgset) >0.01) > 0.05)
+  
+  pdata_out
+}
+
+# summarize controls
+controls_1 <- map(control_metrics(et_ACA), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE115508",
+         dataset =  "1") %>%
+  select(dataset, GEO_accession, everything())
+
+ss_b7 <- sex_geno(et_ACA, rgset_ACA, ss_b7 %>% ungroup()) 
+```
+
+## PE
+
+Bolded are datasets that have idats. In the end I pick just sam's and cox datasets.
+
+GSE57767 - ELOVITZ, 14 term, 19 term PE, 12 preterm PE, 450k
+GSE73375 - Fry, 36 PE, 36 non-PE, 450k, no idats
+**GSE75196 - Hennessy, 16 non-PE, 8 PE, 450k, IDATs**
+**GSE98224 - Cox, 48, 450k, IDATs**
+**GSE100197 - Robinson, 22 EOPE, 18 LOPE, 43 controls, 450k, IDATs**
+GSE103253 - Steegers-Theunissen, 25 control, 11 EOPE, 11 LOPE, 15 PTB, 450k, no idats
+**GSE125605 - Zhao, 22 PE, 20 non-PE, 450k, idats**
+
+8 + 48 + 22 + 22 = 100
+
+
+```{r, eval = T}
+# robinson / sam's pe
+ss_GSE100197 <- master_ss %>%
+  filter(grepl('GSE100197', GSE_accession),
+         !Sample_Name %in% c('PL21_r1', 'PL64v1v2', 'PM139v2(1)', 'PM72_r'))
+# 5 technical replicates removed
+
+rgset_GSE100197 <- read.metharray.exp(targets = ss_GSE100197)
+et_GSE100197 <- read_idats(ss_GSE100197$Basename)
+ss_GSE100197 <- sex_geno(et_GSE100197, rgset_GSE100197, ss_GSE100197)
+
+# cox PE
+### Someone edited the SS, need to edit to run line 151:
+ss_GSE98224 <- read.metharray.sheet(base = 'Z:/7_ExternalData/GSE98224/IDATs', 
+                                    pattern = 'des.matrix.csv') 
+rgset_GSE98224 <- read.metharray.exp(targets = ss_GSE98224)
+et_GSE98224 <- read_idats(ss_GSE98224$Basename)
+ss_GSE98224 <- sex_geno(et_GSE98224, rgset_GSE98224, ss_GSE98224) %>%
+  as_tibble()
+
+
+# summarize controls
+controls_2 <- map(control_metrics(et_GSE100197), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE100197",
+         dataset =  "2") %>%
+  select(dataset, GEO_accession, everything())
+
+controls_3 <- map(control_metrics(et_GSE98224), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE98224",
+         dataset =  "3") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## NTD
+
+```{r}
+ss_ntd <- master_ss %>%
+  filter(grepl('GSE69502', GSE_accession))
+ss_ntd %>%
+  dplyr::count(Tissue)
+
+rgset_NTD <- read.metharray.exp(targets = ss_ntd)
+et_NTD <- read_idats(ss_ntd$Basename)
+ss_ntd <- sex_geno(et_NTD, rgset_NTD, ss_ntd)
+
+# summarize controls
+controls_4 <- map(control_metrics(et_NTD), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE69502",
+         dataset =  "4") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+### genotype matching
+
+```{r}
+snps <- et_NTD$manifest[probe_type=="rs",index]
+snps <- dont_normalize(et_NTD)[snps,]
+genotypes <- call_genotypes(snps,learn=FALSE)
+donor_id <- enumerate_sample_donors(genotypes)
+
+ss_ntd_donor <- ss_ntd %>% 
+  mutate(donor_id = enumerate_sample_donors(genotypes)) %>%
+  arrange(Case_ID, donor_id) %>% 
+  select(Case_ID, donor_id, Sample_Name, prob_snp_outlier, Tissue)
+  
+p1 <- ss_ntd_donor %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  ggplot(aes(x = Tissue, y = prob_snp_outlier, fill = donor_id)) +
+  geom_bar(stat = 'identity', show.legend = FALSE) +
+#  scale_fill_viridis_c() +
+  scale_fill_gradientn(colors = rainbow(8)) +
+  theme_bw() + 
+  facet_wrap(vars(Case_ID), scales = 'fixed') +
+  scale_y_continuous(labels = scales::percent,
+                     expand = c(0,0)) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.border = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_line(),
+        strip.background = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y.left = element_text(angle = 0),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  labs(y = 'Estimated contamination (probability of outlier)', 
+       fill = '',
+       subtitle = 'Samples are colored by their matching genotypes');p1
+
+ss_ntd_donor %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name),
+         donor_id = as.character(donor_id))%>%
+  pivot_longer(cols = c(Case_ID, donor_id, Tissue)) %>%
+  ggplot(aes(x = Sample_Name, y = name, fill = value)) +
+  geom_tile(show.legend = FALSE) +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_blank(),
+        #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.text.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_blank(),
+        legend.position = 'bottom',
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        plot.margin = unit(c(0,5.5,5.5,5.5), 'pt')) 
+  
+  
+p2 <- ss_ntd_donor %>%
+  mutate(Sample_Name = fct_inorder(Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = ));p2
+```
+
+## decidua 
+
+GSE113600
+
+6 samples: 2 induced abortion, 4 recurrent spontaneous 
+minimal sample information
+
+7 weeks gestation
+
+```{r}
+ss_GSE113600 <- read_xlsx('Z:/7_ExternalData/GSE113600/sample_sheet.xlsx') %>%
+  as.data.frame()
+rgset_GSE113600 <- read.metharray.exp(targets = ss_GSE113600)
+
+# get normalized X Y intensity, and genotype outlier probability
+et_GSE113600 <- read_idats(ss_GSE113600$Basename)
+ss_GSE113600 <- sex_geno(et_GSE113600, rgset_GSE113600, ss_GSE113600) %>% as_tibble
+ss_GSE113600 <- ss_GSE113600 %>%
+  mutate(Sex = NA_character_)
+predicted_sex <- check_sex(et_GSE113600)
+
+
+controls_12 <- map(control_metrics(et_GSE113600), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE113600",
+         dataset =  "12") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE120250
+
+```{r, eval = FALSE}
+# process metadata
+ss_GSE120250 <- read_delim('Z:/7_ExternalData/GSE120250/GSE120250_series_matrix.txt', 
+                           delim = '\t', n_max = 11, skip = 30)
+
+ss_GSE120250 %>% write_csv('Z:/7_ExternalData/GSE120250/GSE120250_ss.csv')
+# manually edit and save as GSE120250_ss_temp.csv
+```
+
+```{r }
+ss_GSE120250 <- read_csv('Z:/7_ExternalData/GSE120250/GSE120250_ss_temp.csv')
+ss_GSE120250 <- ss_GSE120250 %>%
+  mutate(outlier_status = gsub('outlier: ', '', outlier_status),
+         sex = gsub('gender: ', '', sex),
+         art_treatment = gsub('art treatment: ', '', art_treatment))
+rgset_GSE120250 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE120250/IDATs', extended = TRUE)
+
+ss_GSE120250 <- tibble(sample_name = colnames(rgset_GSE120250)) %>%
+  mutate(geo_accession = str_extract(sample_name, 'GSM[0-9]+'),
+         sentrix = str_extract(sample_name, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE120250/IDATs/', sample_name),
+         sample_name = geo_accession) %>%
+  left_join(ss_GSE120250)
+
+x <- DataFrame(ss_GSE120250)
+rownames(x) <- x$geo_accession
+pData(rgset_GSE120250) <- x
+
+et_GSE120250 <- read_idats(ss_GSE120250$Basename)
+ss_GSE120250 <- sex_geno(et_GSE120250, rgset_GSE120250, ss_GSE120250)
+ss_GSE120250 %>% write_csv('Z:/7_ExternalData/GSE120250/GSE120250_ss.csv')
+
+controls_5 <- map(control_metrics(et_GSE120250), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE120250",
+         dataset =  "5") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+# replicates
+
+pm139 
+pm161
+pm77
+
+```{r}
+reps_ss <- master_ss %>%
+  filter(grepl('PM139', Sample_Name) |
+           grepl('PM161', Sample_Name) |
+           grepl('PM77', Sample_Name) |
+           grepl('PL21', Sample_Name) |
+           grepl('PM306', Sample_Name),
+         grepl('Villi', Tissue))
+reps_ss_450k <- reps_ss %>%
+  filter(Platform == '450k')
+reps_ss_EPIC <- reps_ss %>%
+  filter(Platform == '850k')
+
+rgset_reps_EPIC <- read.metharray.exp(targets = reps_ss_EPIC, extended = TRUE, force = TRUE)
+rgset_reps_450k <- read.metharray.exp(targets = reps_ss_450k, extended = TRUE)
+
+et_reps_450K <- read_idats(rgset_reps_450k$Basename)
+et_reps_EPIC <- read_idats(rgset_reps_EPIC$Basename)
+
+reps_ss_450k <- sex_geno(et_reps_450K, rgset_reps_450k, reps_ss_450k)
+reps_ss_EPIC <- sex_geno(et_reps_EPIC, rgset_reps_EPIC, reps_ss_EPIC)
+```
+
+
+## GSE98938
+
+```{r, eval = FALSE}
+# process metadata
+ss_GSE98938 <- read_delim('Z:/7_ExternalData/GSE98938/GSE98938_series_matrix.txt', 
+                           delim = '\t', n_max = 1, skip = 45)
+
+
+ss_GSE98938 <- t(ss_GSE98938)[2:ncol(ss_GSE98938),,drop = FALSE]  %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  as_tibble()
+
+ss_GSE98938 <- ss_GSE98938 %>%
+  dplyr::rename(Sample_Name = V1,
+         GSM_title = rowname) %>%
+  mutate(GA_cat = case_when(
+    grepl('term', GSM_title) ~ 'Term',
+    grepl('second', GSM_title) ~ 'Second',
+    grepl('third', GSM_title) ~ 'Third'
+  ),
+  
+  Tissue = case_when(
+    grepl('basal', GSM_title) ~ 'Basal plate',
+    grepl('chorion', GSM_title) ~ 'Chorion',
+    grepl('villi', GSM_title) ~ 'Chorionic villi',
+    grepl('amnion', GSM_title) ~ 'Amnion',
+    grepl('trophoblast', GSM_title) ~ 'Cytotrophoblast'
+  ),  
+  GSM_accession = Sample_Name)
+  
+rgset_GSE98938 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE98938/GSE98938_RAW', extended = TRUE)
+
+
+ss_GSE98938 <- tibble(coln = colnames(rgset_GSE98938)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE98938/GSE98938_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE98938) %>% 
+  select(Sample_Name:Tissue, Sentrix, GSM_title, GSM_accession, Basename)
+
+x <- DataFrame(as.matrix(ss_GSE98938))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE98938) <- x
+
+et_GSE98938  <- ewastools::read_idats(ss_GSE98938$Basename)
+ss_GSE98938 <- sex_geno(et_GSE98938, rgset_GSE98938, ss_GSE98938)
+
+ss_GSE98938 %>% write_csv('Z:/7_ExternalData/GSE98938/GSE98938_ss.csv')
+
+controls_6 <- map(control_metrics(et_GSE98938), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE98938",
+         dataset =  "6") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE75248
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE75248 <- read.table('Z:/7_ExternalData/GSE75248/GSE75248metadata.csv',
+                          sep = '\t') %>% 
+  as_tibble() %>%
+  dplyr::rename(Sample_Name = geo_accession) %>%
+  mutate(GSM_accession = Sample_Name)
+
+rgset_GSE75248 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE75248/IDATs', extended = TRUE)
+
+
+ss_GSE75248 <- tibble(coln = colnames(rgset_GSE75248)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE75248/IDATs/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE75248) %>% 
+  select(Sample_Name:Nightshift, Sentrix, GSM_accession, Basename)
+
+et_GSE75248  <- ewastools::read_idats(ss_GSE75248$Basename)
+ss_GSE75248 <- sex_geno(et_GSE75248, rgset_GSE75248, ss_GSE75248)
+
+x <- DataFrame(as.matrix(ss_GSE75248))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE75248) <- x
+
+ss_GSE75248 %>% write_csv('Z:/7_ExternalData/GSE75248/GSE75248_ss.csv')
+
+controls_7 <- map(control_metrics(et_GSE75248), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE75248",
+         dataset =  "7") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE71678
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE71678 <- read.csv('Z:/7_ExternalData/GSE71678/GSE71678metadata.csv') %>%
+  as_tibble() %>% select(-X) %>%
+  rename(Sample_Name = Sample_ID,
+         GSM_accession = GEO_Accession)
+
+rgset_GSE71678 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE71678/GSE71678_RAW', extended = TRUE)
+
+ss_GSE71678 <- tibble(coln = colnames(rgset_GSE71678)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE71678/GSE71678_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE71678) 
+
+et_GSE71678  <- ewastools::read_idats(ss_GSE71678$Basename)
+ss_GSE71678 <- sex_geno(et_GSE71678, rgset_GSE71678, ss_GSE71678)
+
+x <- DataFrame(as.matrix(ss_GSE71678))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE71678) <- x
+
+ss_GSE71678 %>% write_csv('Z:/7_ExternalData/GSE71678/GSE71678_ss.csv')
+
+controls_8 <- map(control_metrics(et_GSE71678), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE71678",
+         dataset =  "8") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE93208
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE93208 <- read_delim('Z:/7_ExternalData/GSE93208/GSE93208_series_matrix.txt',
+                          
+                           delim = '\t', n_max = 14, skip = 29)
+
+
+ss_GSE93208 <- t(ss_GSE93208)[1:ncol(ss_GSE93208),,drop = FALSE] 
+colnames(ss_GSE93208) <- ss_GSE93208[1,]
+ss_GSE93208 <- ss_GSE93208 %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  as_tibble() %>%
+  dplyr::slice(-1)
+
+ss_GSE93208 <- ss_GSE93208 %>%
+  dplyr::rename(Sample_Name = sample_geo_accession) %>%
+  mutate(GSM_accession = Sample_Name) %>%
+  select(Sample_Name, GSM_accession, contains('characteristic')) %>%
+  mutate(Tissue = "Chorionic villi",
+         Cell_type = 'Cytotrophoblast',
+         GA = case_when(
+           grepl('8', sample_characteristics_ch1_4) ~ "8-10 weeks",
+           grepl('12', sample_characteristics_ch1_4) ~ "12-14 weeks"
+           ),
+         DNA_quantity = gsub('dna quantity (ng): ', '',
+                             sample_characteristics_ch1_5, fixed = TRUE) %>%
+           as.numeric(),
+         Date = gsub('date: ', '', sample_characteristics_ch1_6)
+         ) %>%
+  select(Sample_Name, Tissue:Date, GSM_accession)
+
+rgset_GSE93208 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE93208/GSE93208_RAW', extended = TRUE)
+
+ss_GSE93208 <- tibble(coln = colnames(rgset_GSE93208)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE93208/GSE93208_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE93208) %>% 
+  select(Sample_Name:Date, Sentrix, GSM_accession, Basename)
+
+et_GSE93208  <- ewastools::read_idats(ss_GSE93208$Basename)
+ss_GSE93208 <- sex_geno(et_GSE93208, rgset_GSE93208, ss_GSE93208)
+
+x <- DataFrame(as.matrix(ss_GSE93208))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE93208) <- x
+
+ss_GSE93208 %>% write_csv('Z:/7_ExternalData/GSE93208/GSE93208_ss.csv')
+
+controls_x <- map(control_metrics(et_GSE93208), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE93208",
+         dataset =  "x") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE167885
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE167885 <- read_delim('Z:/7_ExternalData/GSE167885/GSE167885_series_matrix.txt',
+                          
+                           delim = '\t', n_max = 13, skip = 29)
+
+
+ss_GSE167885 <- t(ss_GSE167885)[1:ncol(ss_GSE167885),,drop = FALSE] 
+colnames(ss_GSE167885) <- ss_GSE167885[1,]
+
+ss_GSE167885 <- ss_GSE167885 %>%
+  as.data.frame() %>%
+  janitor::clean_names() %>%
+  as_tibble() %>%
+  dplyr::slice(-1)
+
+ss_GSE167885 <- ss_GSE167885 %>%
+  dplyr::rename(Sample_Name = sample_geo_accession) %>%
+  mutate(GSM_accession = Sample_Name) %>%
+  select(Sample_Name, GSM_accession, contains('characteristic')) %>%
+  mutate(Tissue = "Chorionic villi",
+         Birthweight_g = gsub('birthweight (grams): ', '',
+                             sample_characteristics_ch1_2, fixed = TRUE) %>%
+           as.numeric(),
+         Sex = ifelse(grepl('Male', sample_characteristics_ch1_3),
+                      'M', 'F'),
+         MA =  gsub('mage (age of mother) (years): ', '',
+                     sample_characteristics_ch1_4, fixed = TRUE) %>%
+           as.numeric(),
+         BMI =  gsub('bmi (body mass index): ', '',
+                     sample_characteristics_ch1_5, fixed = TRUE) %>%
+           as.numeric()) %>%
+  select(Sample_Name, Tissue:BMI, GSM_accession)
+
+rgset_GSE167885 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE167885/GSE167885_RAW', extended = TRUE,
+                                      force = TRUE)
+
+ss_GSE167885 <- tibble(coln = colnames(rgset_GSE167885)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE167885/GSE167885_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE167885) %>% 
+  select(Sample_Name:BMI, Sentrix, GSM_accession, Basename)
+
+et_GSE167885  <- ewastools::read_idats(ss_GSE167885$Basename)
+ss_GSE167885 <- sex_geno(et_GSE167885, rgset_GSE167885, ss_GSE167885)
+
+x <- DataFrame(as.matrix(ss_GSE167885))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE167885) <- x
+
+ss_GSE167885 %>% write_csv('Z:/7_ExternalData/GSE167885/GSE167885_ss.csv')
+
+controls_9 <- map(control_metrics(et_GSE167885), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE167885",
+         dataset =  "9") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE125605
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE125605 <- read.table('Z:/7_ExternalData/GSE125605/GSE125605metadata.txt') %>%
+  as_tibble() %>% 
+  dplyr::rename(GSM_accession = GEO_Accession) %>%
+  mutate(Sample_Name = GSM_accession) 
+
+rgset_GSE125605 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE125605/GSE125605_RAW', extended = TRUE,
+                                      force = TRUE)
+
+ss_GSE125605 <- tibble(coln = colnames(rgset_GSE125605)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE125605/GSE125605_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE125605) %>% 
+  select(Sample_Name, Pathology, GA, Sentrix, GSM_accession, Basename)
+
+et_GSE125605  <- ewastools::read_idats(ss_GSE125605$Basename)
+
+ss_GSE125605 <- sex_geno(et_GSE125605, rgset_GSE125605, ss_GSE125605)
+x <- DataFrame(as.matrix(ss_GSE125605))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE125605) <- x
+
+ss_GSE125605 %>% write_csv('Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+
+controls_10 <- map(control_metrics(et_GSE125605), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE125605",
+         dataset =  "10") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+## GSE75196
+
+```{r eval = FALSE}
+# process metadata
+ss_GSE75196 <- read.table('Z:/7_ExternalData/GSE75196/GSE75196metadata.txt') %>%
+  as_tibble() %>% 
+  dplyr::rename(GSM_accession = GEO_Accession) %>%
+  mutate(Sample_Name = GSM_accession) 
+
+rgset_GSE75196 <- read.metharray.exp(base = 'Z:/7_ExternalData/GSE75196/GSE75196_RAW', extended = TRUE,
+                                      force = TRUE)
+
+ss_GSE75196 <- tibble(coln = colnames(rgset_GSE75196)) %>%
+  mutate(GSM_accession = str_extract(coln, 'GSM[0-9]+'),
+         Sentrix = str_extract(coln, '(?<=_)[0-9_]+[A-z0-9]+'),
+         Basename = paste0('Z:/7_ExternalData/GSE75196/GSE75196_RAW/', coln)) %>%
+  select(-coln) %>%
+  right_join(ss_GSE75196) %>% 
+  select(Sample_Name, Pathology, Fetal_Sex, GA, Sentrix, GSM_accession, Basename)
+
+et_GSE75196  <- ewastools::read_idats(ss_GSE75196$Basename)
+ss_GSE75196 <- sex_geno(et_GSE75196, rgset_GSE75196, ss_GSE75196)
+
+x <- DataFrame(as.matrix(ss_GSE75196))
+rownames(x) <- x$Sample_Name
+pData(rgset_GSE75196) <- x
+
+ss_GSE75196 %>% write_csv('Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+
+controls_11 <- map(control_metrics(et_GSE75196), ~sum(. < attr(., "threshold"), 
+                                                      na.rm = TRUE)) %>% 
+  as_tibble %>% 
+  mutate(GEO_accession = "GSE75196",
+         dataset =  "11") %>%
+  select(dataset, GEO_accession, everything())
+```
+
+
+## Villi maternal
+PM372_vm
+PM375_vm
+PM376_vm
+
+```{r, eval = FALSE}
+vm_ss <- master_ss %>%
+  filter(grepl('mv', Sample_Name))
+
+rgset_vm <- read.metharray.exp(targets = vm_ss, extended = TRUE, force = TRUE)
+et_vm <- read_idats(rgset_vm$Basename)
+vm_ss <- sex_geno(et_vm, rgset_vm, vm_ss)
+```
+
+# Controls
+
+```{r eval = FALSE}
+controls<-bind_rows(controls_1, controls_2, controls_3,
+          controls_4, controls_5, controls_6,
+          controls_7, controls_8, controls_9,
+          controls_10, controls_11, controls_12,
+          controls_x)
+controls %>% write_csv(here::here('results', '0-0_dataset-controls.csv'))
+```
+
+# Save data
+
+```{r, eval = FALSE}
+saveRDS(rgset_ACA, here::here('data', 'r objects', '0-0_rgset-ACA.rds'))
+saveRDS(rgset_GSE100197, here::here('data', 'r objects', '0-0_rgset-GSE100197.rds'))
+saveRDS(rgset_GSE98224, here::here('data', 'r objects', '0-0_rgset-GSE9822.rds'))
+saveRDS(rgset_NTD, here::here('data', 'r objects', '0-0_rgset-NTD.rds'))
+saveRDS(rgset_GSE113600, here::here('data', 'r objects', '0-0_rgset-GSE113600.rds'))
+saveRDS(rgset_GSE120250, here::here('data', 'r objects', '0-0_rgset-GSE120250.rds'))
+saveRDS(rgset_reps_EPIC, here::here('data', 'r objects', '0-0_rgset-reps-850k.rds'))
+saveRDS(rgset_reps_450k, here::here('data', 'r objects', '0-0_rgset-reps-450k.rds'))
+
+
+saveRDS(rgset_GSE98938, 'Z:/7_ExternalData/GSE98938/GSE98938_rgset_extended.rds')
+# GSE75248/GSE75248_rgsetextended.rds - already created by AI
+# GSE71678/GSE71678_rgsetextended.rds created by IF
+saveRDS(rgset_GSE93208, 
+        'Z:/7_ExternalData/GSE93208/GSE93208_rgset_extended.rds')
+saveRDS(rgset_GSE167885,
+        'Z:/7_ExternalData/GSE167885/GSE167885_rgset_extended.rds')
+saveRDS(rgset_GSE125605,
+        'Z:/7_ExternalData/GSE125605/GSE125605_rgset_extended.rds')
+saveRDS(rgset_GSE75196,
+        'Z:/7_ExternalData/GSE75196/GSE75196_rgset_extended.rds')
+
+saveRDS(ss_b7, here::here('data', 'r objects', '0-0_ss-ACA.rds'))
+saveRDS(ss_GSE100197, here::here('data', 'r objects', '0-0_ss-GSE100197.rds'))
+saveRDS(as_tibble(ss_GSE98224), here::here('data', 'r objects', '0-0_ss-GSE98224.rds'))
+saveRDS(ss_ntd, here::here('data', 'r objects', '0-0_ss-NTD.rds'))
+saveRDS(ss_GSE113600, here::here('data', 'r objects', '0-0_ss-GSE113600.rds'))
+saveRDS(ss_GSE120250, here::here('data', 'r objects', '0-0_ss-GSE120250.RDS'))
+saveRDS(reps_ss_EPIC, here::here('data', 'r objects', '0-0_ss-reps-850k.rds'))
+saveRDS(reps_ss_450k, here::here('data', 'r objects', '0-0_ss-reps-450k.rds'))
+
+saveRDS(rgset_vm, here::here('data', 'r objects', '0-0_rgset-vm.rds'))
+saveRDS(vm_ss, here::here('data', 'r objects', '0-0_ss-vm.rds'))
+```
+
