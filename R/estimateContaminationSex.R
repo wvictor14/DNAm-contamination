@@ -1,6 +1,11 @@
-# a wrapper using ewastools to obtain SNP contamination and sex info, and minfi to get detection p
 
-# input is an ewastools object and a minfi rgset object
+#' estimates contamination and sex from ewastools
+#' 
+#' a wrapper using ewastools to obtain SNP contamination and sex info, and 
+#' minfi to get detection p
+#' @param et_object ewastools object
+#' @param rgset rgset object
+#' @export
 estimateContaminationSex <- function(et_object, rgset) {
     
     predicted_sex <- check_sex(et_object %>% correct_dye_bias())
@@ -13,6 +18,7 @@ estimateContaminationSex <- function(et_object, rgset) {
     # fit mixture model to call genotypes
     snps_called <- ewastools::call_genotypes(snps, learn = T)
     
+    #return about
     out_df <- tibble(
         sample_id = colnames(rgset),
         prob_snp_outlier = colMeans(snps_called$outliers, na.rm = T),
