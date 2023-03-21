@@ -1,0 +1,120 @@
+---
+title: "contamination by phenotype"
+author: "Victor Yuan"
+date: "31/08/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Set up
+
+```{r, message = FALSE, warning = FALSE}
+library(pheatmap)
+library(tidyverse)
+library(viridis)
+library(ggrepel)
+library(planet)
+library(broom)
+library(scales)
+
+ss <- read_csv(here::here('data', 'raw', '1-3_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+```
+
+# linear modelling
+
+```{r}
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  ggplot(aes(x = Group, y = prob_snp_outlier )) +
+  geom_boxplot() +
+  facet_grid(cols = vars(dataset), 
+             scale = 'free_x')
+```
+
+Missing group variables for some datasets
+
+Grab em from original ss
+
+dataset 8 has many variables to potentially test, neurobehaviour, omit
+dataset 9 has arsenic, doesn't make sense to test, omit
+
+dataset 5,7 and 10 have other tissues / no villi / no phenotype
+
+dataset 11 does not have any metadata to test against
+
+```{r}
+ss_GSE125605 <- read_csv('Z:/7_ExternalData/GSE125605/GSE125605_ss.csv')
+ss <- ss %>% 
+  left_join(ss_GSE125605 %>%
+              mutate(Group = Pathology) %>%
+              select(Sample_Name, Group), by = 'Sample_Name') %>%
+  mutate(Group = coalesce(Group.x, Group.y)) %>%
+  select(-Group.x, -Group.y)
+
+ss_GSE75196 <- read_csv('Z:/7_ExternalData/GSE75196/GSE75196_ss.csv')
+ss <- ss %>% 
+  left_join(ss_GSE75196 %>%
+              mutate(Group = Pathology) %>%
+              select(Sample_Name, Group),
+            by = 'Sample_Name') %>%
+  mutate(Group = coalesce(Group.x, Group.y)) %>%
+  select(-Group.x, -Group.y)
+
+
+ss %>%
+  filter(Tissue == 'Villi', !is.na(Group)) %>%
+  ggplot(aes(x = Group, y = prob_snp_outlier )) +
+  geom_boxplot() +
+  facet_grid(cols = vars(dataset), 
+             scale = 'free_x') + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+    #axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.spacing.x = unit(0, "lines"),
+    strip.background = element_rect(color = NA, fill = NA))+
+  labs(x ='', y = 'P(outlier)')
+```
+
+## Stats
+
+```{r}
+ss %>%
+  filter(Tissue == 'Villi', !is.na(Group)) %>%
+  nest(data = -c(dataset)) %>%
+  mutate(lm = map(data, ~lm(prob_snp_outlier ~ Group, .) %>%
+                    tidy())) %>%
+  unnest(lm) %>%
+  select(-data) %>%
+  filter(term != '(Intercept)')
+```
+
+None statistically significantly increased
+
+```{r}
+ss %>%
+  filter(Tissue == 'Villi', !is.na(Group)) %>%
+  nest(data = -c(dataset)) %>%
+  mutate(lm = map(data, ~lm(PC1_mbd500 ~ Group, .) %>%
+                    tidy())) %>%
+  unnest(lm) %>%
+  select(-data) %>%
+  filter(term != '(Intercept)')
+```
+
+
+```{r}
+```
