@@ -1,0 +1,556 @@
+---
+title: "epigenetic age"
+author: "Victor Yuan"
+date: "29/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Set up
+
+```{r, message = FALSE, warning = FALSE}
+library(pheatmap)
+library(tidyverse)
+library(viridis)
+library(ggrepel)
+library(planet)
+library(broom)
+library(scales)
+
+ss <- read_csv(here::here('data', 'raw', '1-3_ss.csv'))
+
+# color key
+color_code <- readRDS('Z:/Victor/Projects/NIH - cells/data/main/interim/2_3_color_code.rds')
+color_code_tissue <- setNames(color_code$Colors_Tissue, gsub(' cs', '',color_code$label))
+
+color_code_tissue <- c(color_code_tissue, 'nRBC' = 'grey')
+color_code_tissue <- c(color_code_tissue, 'Syncytiotrophoblast' = '#f4702e')
+colors <- readRDS(here::here('data', 'r objects', 'dataset-colors.rds'))
+
+# horvath clock
+h_EGA <- read_csv(here::here('data', 'raw', '1-3_horvath-epi-age.csv'))
+```
+
+## Sex flagg x PC1
+
+```{r}
+(a<-ss %>% 
+  ggplot(aes(x = Flag_XY_contam, y = PC1_mbd500, 
+             fill = Flag_XY_contam)) +
+  geom_boxplot(outlier.size = 0.6) +
+    theme_bw() +
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+    panel.border = element_blank(),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+    scale_x_discrete(labels = c('XY flagged', 'Normal'))+
+  scale_fill_discrete(breaks = c('Flagged'),
+                       labels = '',
+                       guide = "none") +
+  labs(fill ='', x= '', y = 'P(outlier)') +
+  coord_flip()) # H: 2.25, w: 3.5
+
+ss %>%
+  mutate(Flag_XY_contam = ifelse(is.na(Flag_XY_contam), 
+                                 'not flagged', Flag_XY_contam)) %>%
+  lm(PC1_mbd500 ~ Flag_XY_contam, data = .) %>%
+  tidy()
+```
+
+# EGA decidua
+
+planet/placenta clock
+
+```{r}
+ss %>%
+  filter(Tissue == 'Decidua')
+
+#load GSE74738
+GSE74738_mbd_ss <- read_csv(here::here('data', 'raw', '0-2_GSE74738_mbd_ss.csv'))
+GSE74738_mbd_norm <- readRDS(here::here('data', 'r objects', '0-2_GSE74738_mbd_bmiq_noob.rds'))
+
+# compute GA and filter columns
+GSE74738_mbd_ss <- GSE74738_mbd_ss %>%
+  mutate(GA_epi_RPC = planet::predictAge(GSE74738_mbd_norm),
+         GA_epi_CPC = planet::predictAge(GSE74738_mbd_norm, type = 'CPC'),
+         GA_epi_RRPC = planet::predictAge(GSE74738_mbd_norm, type = 'RRPC')) %>%
+  select(Sample_Name, prob_snp_outlier, contains('normalized'), 
+         contains('GA'), Tissue)
+
+# visualize reported vs epi
+GSE74738_mbd_ss %>%
+  pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  ggplot(aes(x = GA, y = EGA, color = Tissue)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = 'black', alpha = 0.75,
+              size = 0.5) +
+  
+  facet_grid(cols = vars(Type)) +
+  coord_equal() +
+  theme_bw() + 
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.spacing.x = unit(0, "lines"),
+    strip.background = element_rect(color = NA, fill = NA)) +
+  labs(title = 'GA (wks)',
+       y = 'Epigenetic', color = '', x = 'Reported') 
+
+# mean difference reported vs epi
+GSE74738_mbd_ss %>%
+    pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  filter(!is.na(GA)) %>%
+  group_by(Tissue, Type) %>%
+  summarize(mean_diff = mean(EGA - GA)) %>%
+  ungroup() %>%
+  pivot_wider(id_cols = Tissue,
+              names_from = Type,
+              values_from = mean_diff)
+```
+
+
+# EGA villi
+
+```{r}
+(ss %>%
+  filter(Tissue == 'Villi') %>%
+  mutate(EGA_vs_GA = case_when(
+    GA_epi_CPC < GA - 1.5 ~ "EGA < GA-1.5",
+    GA_epi_CPC > GA + 1.5 ~ "EGA > GA+1.5",
+    TRUE ~ NA_character_
+  )) %>%
+  group_by(dataset) %>%
+  summarize(n_villi = sum(Tissue == 'Villi'),
+            
+            # indicate which datasets have reported GA and villi
+            GA_reported = ifelse(sum(!is.na(GA)) > 0,
+                                 TRUE, FALSE),
+            `EGA < GA-1.5` = sum(EGA_vs_GA == 'EGA < GA-1.5', na.rm = TRUE),
+            `EGA > GA+1.5` = sum(EGA_vs_GA == 'EGA > GA+1.5', na.rm = TRUE)) %>%
+  write_csv(here::here('data', 'raw', '1-4_ega-outliers.csv')))
+
+
+ss %>%
+  filter(!is.na(GA),
+         Tissue == 'Villi') %>%
+  mutate(EGA_vs_GA = case_when(
+    GA_epi_CPC < GA - 1.5 ~ "EGA < GA-1.5",
+    GA_epi_CPC > GA + 1.5 ~ "EGA > GA+1.5",
+    TRUE ~ NA_character_
+  )) %>%
+  ggplot(aes(x =  GA, y = GA_epi_CPC, color = EGA_vs_GA)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = 'black', alpha = 0.75,
+              size = 0.5) +
+  coord_equal() +
+  facet_wrap(vars(dataset), nrow = 2) +
+  theme_bw() + 
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.spacing.x = unit(0, "lines"),
+        strip.background = element_rect(color = NA, fill = NA)) +
+  labs(title = 'GA (wks)',
+       y = 'Epigenetic', color = '', x = 'Reported')
+
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  group_by(dataset) %>%
+  summarize(`Mean difference` = mean(GA_epi_RPC - GA, na.rm = TRUE),
+            `Mean GA` = mean(GA, na.rm = TRUE))
+ss %>% 
+  filter(Tissue == 'Villi') %>%
+  pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  filter(!is.na(GA)) %>%
+  group_by(Type) %>%
+  summarize(mean_diff = mean(EGA - GA)) 
+```
+
+
+Together villi + dec
+
+```{r}
+(a <- ss %>%
+  select(Sample_Name, Tissue, contains('GA')) %>%
+   
+  mutate(EGA_vs_GA = case_when(
+    GA_epi_CPC < GA - 1.5 ~ "EGA < GA-1.5",
+    GA_epi_CPC > GA + 1.5 ~ "EGA > GA+1.5",
+    TRUE ~ NA_character_
+  )) %>%
+   
+  bind_rows(GSE74738_mbd_ss %>% 
+              select(Sample_Name, Tissue, contains('GA'))) %>%
+  
+  pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  filter(!is.na(GA),
+         Tissue %in% c('Villi', 'Decidua', 'Maternal Blood'),
+         Type =='CPC') %>%
+  
+  ggplot(aes(x = GA, y = EGA)) +
+  geom_point(alpha = 0.75, size = 0.75) +
+  geom_abline(slope = 1, intercept = 0, color = 'black', alpha = 0.75,
+              size = 0.35) +
+  
+  facet_grid(cols = vars(Tissue)) +
+  coord_equal() +
+  theme_bw() + 
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.spacing.x = unit(0, "lines"),
+    legend.position = 'bottom',
+    legend.direction = 'vertical',
+    strip.background = element_rect(color = NA, fill = NA)) +
+   
+  labs(y = 'Epigenetic\ngestational\nage (weeks)', color = '', 
+       x = 'Reported gestational age (weeks)')) # 2, 5
+ss %>%
+  select(Sample_Name, Tissue, contains('GA')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              select(Sample_Name, Tissue, contains('GA'))) %>%
+  group_by(Tissue) %>%
+  summarize(mean = mean(GA_epi_CPC))
+
+(ss %>%
+  select(Sample_Name, Tissue, contains('GA')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              select(Sample_Name, Tissue, contains('GA'))) %>%
+  
+  pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  filter(!is.na(GA),
+         Tissue %in% c('Villi', 'Decidua', 'Maternal Blood', 
+                       'Chorion', 'Amnion')) %>%
+  group_by(Tissue, Type) %>%
+  summarize(mean_diff = mean(EGA - GA)) %>%
+  ungroup() %>%
+  pivot_wider(id_cols = Tissue,
+              names_from = Type,
+              values_from = mean_diff) %>%
+    write_csv(here::here('data', 'raw', '1-4_ega-reported-mean-diff.csv')))
+
+
+ss %>%
+  select(Sample_Name, Tissue, contains('GA')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              select(Sample_Name, Tissue, contains('GA'))) %>%
+  
+  pivot_longer(cols = contains('GA_epi'),
+               names_prefix = 'GA_epi_',
+               names_to = 'Type',
+               values_to = 'EGA') %>%
+  filter(!is.na(GA),
+         Tissue %in% c('Villi', 'Decidua', 'Maternal Blood', 
+                       'Chorion', 'Amnion')) %>%
+  
+  mutate(EGA_minus_reported = EGA - GA) %>%
+  ggplot(aes(x = Tissue, y = EGA_minus_reported)) +
+  geom_boxplot() + 
+  facet_grid(cols = vars(Type)) +
+  theme_bw() + 
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.spacing.x = unit(0, "lines"),
+    strip.background = element_rect(color = NA, fill = NA))  +
+  coord_flip() +
+  labs(y = 'EGA - Reported (weeks)', x = '')
+
+# difference to p(outlier)
+(a <- ss %>%
+   filter(!is.na(GA),
+         Tissue %in% c('Villi')) %>%
+  mutate(EGA_GA_difference = GA_epi_CPC - GA) %>%
+  ggplot(aes(x = EGA_GA_difference, y = prob_snp_outlier)) +
+  geom_point(size = 0.75, alpha = 0.75) +
+  geom_smooth(method = 'lm') +
+  theme_bw() + 
+  theme(#axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 0, vjust = 0.5),
+    axis.line = element_line(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing.x = unit(0, "lines"),
+    legend.position = 'bottom',
+    legend.direction = 'vertical',
+    strip.background = element_rect(color = NA, fill = NA)) +
+  scale_y_continuous(labels = function(x)percent(x, accuracy = 1)) +
+  labs(x = 'Epigenetic - reported\ngestational age (weeks)',
+       y = 'P(outlier)')) # 2, 3
+
+# difference associated with p outlier
+ss %>%
+   filter(!is.na(GA),
+         Tissue %in% c('Villi')) %>%
+  mutate(EGA_GA_difference = GA_epi_CPC - GA) %>%
+  lm(prob_snp_outlier ~ EGA_GA_difference, data = .) %>%
+  tidy()
+
+ss %>%
+   filter(!is.na(GA),
+         Tissue %in% c('Villi')) %>%
+  mutate(EGA_GA_difference = GA_epi_CPC - GA) %>% 
+  summarize(mean(EGA_GA_difference),
+            sd(EGA_GA_difference))
+```
+
+Compare to other outliers
+
+```{r}
+(ss %>%
+  group_by(dataset) %>%
+  summarize(Flag_all = sum(
+    
+    Flag_XY_contam == 'Flagged' &
+      prob_snp_outlier > 0.15 &
+      GA_epi_RPC - GA > 1,
+    na.rm = TRUE)))
+```
+
+# Horvath's clock
+
+```{r}
+# add maternal age to decidua and m blood samples
+library(readxl)
+GSE74738_ss <- read_xlsx(here::here('data', 'raw', 'Sample sheet Courtney GEO iDMRs.xlsx'), skip = 5)
+GSE74738_mbd_ss <- GSE74738_mbd_ss %>%
+  left_join(GSE74738_ss %>% select(Sample_Name, MA)) %>%
+  mutate(MA = as.numeric(MA)) 
+
+# horvath age clock predicted in 1-3
+h_EGA
+
+# add into one tibble
+ss_vdb_age <- ss %>%
+  select(Sample_Name, Tissue, contains('GA')) %>%
+  bind_rows(GSE74738_mbd_ss %>% 
+              select(Sample_Name, Tissue, contains('GA'),MA)) %>%
+  left_join(h_EGA) 
+
+# visualize mb dec villi
+ss_vdb_age %>%
+  filter(Tissue %in% c('Villi', 'Decidua', 'Maternal Blood')) %>%
+  ggplot(aes(x = Tissue, y = horvath_EGA)) +
+  geom_boxplot() 
+
+ss_vdb_age %>%
+  
+  # create age based on GA and MA
+  mutate(age = ifelse(!is.na(MA), MA,
+                      ifelse(!is.na(GA), GA/52.1429,
+                             NA))) %>% 
+  filter(!is.na(age), !is.na(horvath_EGA)) %>%
+  ggplot(aes(x =age, y = horvath_EGA)) +
+  geom_abline(slope = 1, intercept = 0) +
+  geom_point() +
+  facet_grid(cols = vars(Tissue))
+
+#just villi
+(a <- ss_vdb_age %>%
+  mutate(age = ifelse(!is.na(MA), MA,
+                      ifelse(!is.na(GA), GA/52.1429,
+                             NA))) %>% 
+  filter(!is.na(age), !is.na(horvath_EGA), Tissue == 'Villi') %>%
+  ggplot(aes(x = GA, y = horvath_EGA)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw() +
+  theme(
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      axis.line = element_line(),
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        ) +
+    labs(y = 'Adult EGA\n(years)', x = 'Gestational age (weeks)')
+) # h: 2.25, w: 6.5
+ 
+```
+
+Flag samples with age > 1
+
+```{r}
+ss_vdb_age_flag <- ss_vdb_age %>% 
+  mutate(Flag_EGA_adult = Tissue == 'Villi' & horvath_EGA > 1) %>%
+  filter(!is.na(Flag_EGA_adult)) %>%
+  select(Sample_Name, Flag_EGA_adult, horvath_EGA)
+
+ss <- ss %>%
+  left_join(ss_vdb_age_flag %>% distinct())
+
+ss <- ss %>% 
+  mutate(Flag_EGA_adult = ifelse(is.na(Flag_EGA_adult), FALSE, 
+                                       Flag_EGA_adult))
+
+# visualize
+#boxplot
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  ggplot(aes(x = Flag_EGA_adult, y = prob_snp_outlier, fill = Flag_EGA_adult)) +
+  geom_boxplot() +
+  facet_grid(cols = vars(dataset),
+             switch = 'x') +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_fill_discrete(labels = c('low EGA', 'high EGA')) +
+  labs(y = 'P(outlier)', x= 'Dataset')
+
+# scatter
+(a <- ss %>%
+  filter(Tissue == 'Villi') %>%
+  ggplot(aes(x = horvath_EGA, y = prob_snp_outlier)) +
+  geom_point(size = 0.75) +
+  geom_smooth(method = 'lm') +
+    scale_y_continuous(labels = function(x)percent(x, accuracy = 1)) +
+  theme_bw() +
+  theme(axis.line = element_line(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y = 'P(outlier)', x= 'Adult epigenetic age (years)')) # 2, 3
+
+
+#logodds
+ss %>%
+  filter(Tissue == 'Villi') %>%
+  ggplot(aes(x = horvath_EGA, y = prob_snp_outlier_logodds)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_bw() +
+  theme(
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y = 'P(outlier)', x= 'Adult EGA (years)')
+
+# p(outlier) by dataset specific associations
+(a <- ss %>%
+  filter(Tissue == 'Villi', !is.na(horvath_EGA)) %>%
+  ggplot(aes(x = horvath_EGA, y = prob_snp_outlier)) +
+  geom_point(alpha = 0.75) +
+  geom_smooth(method = 'lm') +
+  theme_bw() +
+  theme(
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+      axis.line = element_line(),
+      
+        legend.position = 'top',
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y = 'P(outlier)', x= 'Adult EGA (years)')+
+    scale_y_continuous(labels = percent) +
+  facet_wrap(~dataset)) #h:3, w:6.25
+
+
+# stats
+ss %>%
+  group_by(dataset) %>%
+  summarize(sum(Flag_EGA_adult))
+# not very samples/sensitivity
+
+# lm in each dataset
+ss %>%
+  filter(!is.na(Flag_EGA_adult)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_EGA_adult) > 2) %>%
+  nest() %>%
+  mutate(results = purrr::map(data, ~lm(data =., 
+                                        prob_snp_outlier ~ Flag_EGA_adult) %>%
+                                tidy())) %>%
+  select(-data) %>%
+  unnest(cols = c(results)) %>%
+  filter(term == 'Flag_EGA_adultTRUE') %>%
+  select(-term) %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+
+# lm in all, adjusted for dataset
+ss %>%
+  filter(!is.na(Flag_EGA_adult)) %>%
+  group_by(dataset) %>%
+  filter(sum(Flag_EGA_adult) > 2) %>%
+  ungroup() %>%
+  lm(data = ., prob_snp_outlier ~ Flag_EGA_adult + dataset) %>%
+  tidy() %>%
+  mutate(p = pvalue(p.value, accuracy = 0.01))
+
+# using continuous horvath EGA
+ss %>%
+  filter(Tissue == 'Villi', !is.na(horvath_EGA)) %>%
+  lm(prob_snp_outlier~horvath_EGA, data = .) %>%
+  tidy()
+```
+
+```{r}
+write_csv(ss, here::here('data', 'raw', '1-4_ss.csv'))
+```
+
