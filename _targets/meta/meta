@@ -1,0 +1,7 @@
+name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
+data_cs|stem|7dbc7046d1ad9cbe|f51370cf4bd54864|cf15d7fdf2ae0fda|1580321924||t19465.9799049466s|48b59e47f3bd6120|1555|rds|local|vector|||46.87||
+estimateContaminationSex|function|cb2388f50cfdfdea|||||||||||||||
+microsatellites_ewastools|stem|7938a2c8251db36a|7c69e5cc7907308e|0a221c87a6b8629f|-1196331885||t19465.9771480255s|19f0394a87ed7e5e|171532444|rds|local|vector|||8.1||
+microsatellites_ewastools_file|stem|7938a2c8251db36a|c4cd8ef80cc13903|c3b5fc02cdc369c1|445548487|C:/Users/victo/Documents/Projects/DNAm contamination/data/microsatellites/0-3_microsatellites-ewastools.rds|t19465.9662269928s|19f0394a87ed7e5e|171532444|file|local|vector|||14.53||
+microsatellites_rgset|stem|8ebbad1927f0c5e9|ae3ce335a713f035|da42eabf01cbc134|-636660206||t19465.9782040586s|114956fb4364c2e3|277306707|rds|local|vector|||16.44||
+microsatellites_rgset_file|stem|8ebbad1927f0c5e9|a618418e77cedd2d|c3b5fc02cdc369c1|1221741560|C:/Users/victo/Documents/Projects/DNAm contamination/data/microsatellites/0-3_microsatellites-rgset.rds|t19465.9601110894s|114956fb4364c2e3|277306707|file|local|vector|||14.37||
