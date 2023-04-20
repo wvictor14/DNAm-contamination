@@ -3,7 +3,7 @@ title: "0-3_download-microsat-samples"
 output: html_document
 date: "2022-08-12"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 About 12/43 samples were analyzed as part of the microsatellites experiments in order to address the problem that the original list of samples were all lowish contamination. These additional samples provide some observations in the upper contamination range.
@@ -18,12 +18,14 @@ This script is to first download and process the methylation data into this repo
 
 # Libraries
 
-```{r}
+```{r, message=FALSE}
+library(readxl)
+library(ewastools)
+library(IlluminaHumanMethylation450kmanifest)
+library(IlluminaHumanMethylationEPICmanifest)
 library(minfi)
 library(tidyverse)
 library(here)
-library(readxl)
-library(ewastools)
 ```
 
 ## load in microsatellites data
@@ -133,15 +135,24 @@ rgset
 et <- read_idats(joined$Basename)
 ```
 
-basic preprocessing
+# write to disk
 
 ```{r}
+saveRDS(rgset, here('data', 'microsatellites', '0-3_microsatellites-rgset.rds'))
+saveRDS(et, here('data',  'microsatellites', '0-3_microsatellites-ewastools.rds'))  
+```
+
+### basic preprocessing
+
+**2023-04-18** moving this to targets
+
+```{r, eval = FALSE}
 # get snp contamination, sex, and detection p values
 source('estimateContaminationSex.R')
 gs <- estimateContaminationSex(et, rgset)
 ```
 
-```{r}
+```{r, eval = FASE}
 #get controls
 controls <- map(control_metrics(et), ~sum(. < attr(., "threshold"), 
                                                       na.rm = TRUE)) %>% 
